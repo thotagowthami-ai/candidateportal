@@ -14,10 +14,7 @@ import { PG_POOL } from './database.constants';
         const dbUrl = configService.get<string>('DATABASE_URL');
 
         console.log('NEON_DATABASE_URL:', neonUrl ? 'SET' : 'NOT SET');
-        console.log(
-          'DATABASE_URL:',
-          dbUrl ? dbUrl.substring(0, 30) + '...' : 'NOT SET',
-        );
+        console.log('DATABASE_URL:', dbUrl ? 'SET' : 'NOT SET');
 
         const connectionString = neonUrl || dbUrl;
 
