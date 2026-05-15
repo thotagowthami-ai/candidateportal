@@ -1,0 +1,675 @@
+{
+  "info": {
+    "name": "CandidatePortal - Deployment Test Suite",
+    "_postman_id": "9fd6e553-9ec0-4bc4-a6fe-495f84bc78cb",
+    "description": "Post-deployment smoke and API flow tests for CandidatePortal. Update environment variables before running.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "00 - Smoke",
+      "item": [
+        {
+          "name": "Health Check",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}{{health_path}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "{{health_path}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 200\", function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response time is below 5000ms\", function () {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "OpenAPI Spec",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}{{openapi_path}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "{{openapi_path}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"OpenAPI endpoint reachable\", function () {",
+                  "  pm.expect(pm.response.code).to.be.oneOf([200, 401, 403]);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "01 - Auth",
+      "item": [
+        {
+          "name": "Login (JSON)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{auth_email}}\",\n  \"password\": \"{{auth_password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}{{auth_login_path}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "{{auth_login_path}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Login response status is 200\", function () {",
+                  "  pm.expect(pm.response.code).to.equal(200);",
+                  "});",
+                  "",
+                  "let body = {};",
+                  "try {",
+                  "  body = pm.response.json();",
+                  "} catch (e) {",
+                  "  body = {};",
+                  "}",
+                  "",
+                  "const token = body.access_token || body.token || (body.data && body.data.access_token);",
+                  "if (token) {",
+                  "  pm.environment.set(\"access_token\", token);",
+                  "}",
+                  "",
+                  "pm.test(\"Access token is set\", function () {",
+                  "  pm.expect(pm.environment.get(\"access_token\")).to.be.a(\"string\").and.not.empty;",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login (OAuth2 Password Form)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "username",
+                  "value": "{{auth_email}}",
+                  "type": "text"
+                },
+                {
+                  "key": "password",
+                  "value": "{{auth_password}}",
+                  "type": "text"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{base_url}}{{auth_login_path}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "{{auth_login_path}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "  let body = {};",
+                  "  try {",
+                  "    body = pm.response.json();",
+                  "  } catch (e) {",
+                  "    body = {};",
+                  "  }",
+                  "",
+                  "  const token = body.access_token || body.token || (body.data && body.data.access_token);",
+                  "  if (token) {",
+                  "    pm.environment.set(\"access_token\", token);",
+                  "  }",
+                  "}",
+                  "",
+                  "pm.test(\"Status is acceptable\", function () {",
+                  "  pm.expect(pm.response.code).to.be.oneOf([200, 400, 401, 404, 405]);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Continue With Google",
+          "item": [
+            {
+              "name": "Google OAuth - Start",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}{{auth_google_start_path}}",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "{{auth_google_start_path}}"
+                  ]
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test(\"Google start endpoint responds\", function () {",
+                      "  pm.expect(pm.response.code).to.be.oneOf([200, 302, 303, 307, 308]);",
+                      "});",
+                      "",
+                      "const location = pm.response.headers.get(\"location\");",
+                      "if (location) {",
+                      "  pm.environment.set(\"google_redirect_url\", location);",
+                      "}"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "Google OAuth - Callback (code exchange)",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}{{auth_google_callback_path}}?code={{google_auth_code}}&state={{google_state}}",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "{{auth_google_callback_path}}"
+                  ],
+                  "query": [
+                    {
+                      "key": "code",
+                      "value": "{{google_auth_code}}"
+                    },
+                    {
+                      "key": "state",
+                      "value": "{{google_state}}"
+                    }
+                  ]
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test(\"Google callback endpoint responds\", function () {",
+                      "  pm.expect(pm.response.code).to.be.oneOf([200, 201, 302, 303, 307, 308, 400, 401]);",
+                      "});",
+                      "",
+                      "let body = {};",
+                      "try {",
+                      "  body = pm.response.json();",
+                      "} catch (e) {",
+                      "  body = {};",
+                      "}",
+                      "",
+                      "const token = body.access_token || body.token || (body.data && body.data.access_token);",
+                      "if (token) {",
+                      "  pm.environment.set(\"access_token\", token);",
+                      "}",
+                      "",
+                      "const location = pm.response.headers.get(\"location\");",
+                      "if (location) {",
+                      "  pm.environment.set(\"post_google_redirect\", location);",
+                      "}"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Get Current User",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}{{profile_path}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "{{profile_path}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Profile status is 200\", function () {",
+                  "  pm.expect(pm.response.code).to.equal(200);",
+                  "});",
+                  "",
+                  "let body = {};",
+                  "try {",
+                  "  body = pm.response.json();",
+                  "} catch (e) {",
+                  "  body = {};",
+                  "}",
+                  "",
+                  "if (body.id || body.user_id) {",
+                  "  pm.environment.set(\"candidate_id\", String(body.id || body.user_id));",
+                  "}",
+                  "",
+                  "pm.test(\"Profile payload has identity\", function () {",
+                  "  pm.expect(body.email || body.id || body.user_id).to.exist;",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "02 - Jobs",
+      "item": [
+        {
+          "name": "List Jobs",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}{{jobs_list_path}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "{{jobs_list_path}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"List jobs status is 200\", function () {",
+                  "  pm.expect(pm.response.code).to.equal(200);",
+                  "});",
+                  "",
+                  "let body = [];",
+                  "try {",
+                  "  body = pm.response.json();",
+                  "} catch (e) {",
+                  "  body = [];",
+                  "}",
+                  "",
+                  "const jobs = Array.isArray(body) ? body : (body.items || body.data || []);",
+                  "if (jobs.length > 0) {",
+                  "  const firstJob = jobs[0];",
+                  "  const id = firstJob.id || firstJob.job_id;",
+                  "  if (id) pm.environment.set(\"job_id\", String(id));",
+                  "}",
+                  "",
+                  "pm.test(\"Jobs response shape looks valid\", function () {",
+                  "  pm.expect(Array.isArray(jobs)).to.equal(true);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get Job By ID",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}{{job_detail_path}}/{{job_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "{{job_detail_path}}",
+                "{{job_id}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Get job status is 200\", function () {",
+                  "  pm.expect(pm.response.code).to.equal(200);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "03 - Resumes",
+      "item": [
+        {
+          "name": "Upload Resume",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "resume_file",
+                  "type": "file",
+                  "src": "{{resume_file_path}}"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{base_url}}{{resumes_upload_path}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "{{resumes_upload_path}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Upload resume status is successful\", function () {",
+                  "  pm.expect(pm.response.code).to.be.oneOf([200, 201]);",
+                  "});",
+                  "",
+                  "let body = {};",
+                  "try {",
+                  "  body = pm.response.json();",
+                  "} catch (e) {",
+                  "  body = {};",
+                  "}",
+                  "",
+                  "const resumeId = body.id || body.resume_id || (body.data && (body.data.id || body.data.resume_id));",
+                  "if (resumeId) {",
+                  "  pm.environment.set(\"resume_id\", String(resumeId));",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List Resumes",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}{{resumes_list_path}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "{{resumes_list_path}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"List resumes status is 200\", function () {",
+                  "  pm.expect(pm.response.code).to.equal(200);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get Resume By ID",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}{{resumes_list_path}}/{{resume_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "{{resumes_list_path}}",
+                "{{resume_id}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Get resume status is 200\", function () {",
+                  "  pm.expect(pm.response.code).to.equal(200);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "04 - Applications",
+      "item": [
+        {
+          "name": "Submit Application",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"candidate_id\": \"{{candidate_id}}\",\n  \"job_id\": \"{{job_id}}\",\n  \"resume_id\": \"{{resume_id}}\",\n  \"cover_letter\": \"Excited to apply through deployment smoke test.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}{{application_submit_path}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "{{application_submit_path}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Submit application status is successful\", function () {",
+                  "  pm.expect(pm.response.code).to.be.oneOf([200, 201]);",
+                  "});",
+                  "",
+                  "let body = {};",
+                  "try {",
+                  "  body = pm.response.json();",
+                  "} catch (e) {",
+                  "  body = {};",
+                  "}",
+                  "",
+                  "const applicationId = body.id || body.application_id || (body.data && (body.data.id || body.data.application_id));",
+                  "if (applicationId) {",
+                  "  pm.environment.set(\"application_id\", String(applicationId));",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get Application By ID",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}{{application_status_path}}/{{application_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "{{application_status_path}}",
+                "{{application_id}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Get application status is 200\", function () {",
+                  "  pm.expect(pm.response.code).to.equal(200);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Ensure we always use the latest token stored in environment."
+        ]
+      }
+    }
+  ]
+}

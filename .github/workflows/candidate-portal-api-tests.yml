@@ -1,0 +1,153 @@
+name: Candidate Portal API Tests
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  newman:
+    runs-on: ubuntu-latest
+    env:
+      DEFAULT_BASE_URL: https://cportal-production.up.railway.app
+      DEFAULT_API_PREFIX: ""
+      DEFAULT_STRICT_SMOKE: "false"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install Newman
+        run: npm install -g newman
+
+      - name: Resolve base URL
+        run: |
+          if [ -n "${{ secrets.BASE_URL }}" ]; then
+            echo "BASE_URL=${{ secrets.BASE_URL }}" >> "$GITHUB_ENV"
+          else
+            echo "BASE_URL=${DEFAULT_BASE_URL}" >> "$GITHUB_ENV"
+          fi
+          echo "Using BASE_URL=${BASE_URL:-$DEFAULT_BASE_URL}"
+
+      - name: Resolve API prefix
+        run: |
+          if [ -n "${{ secrets.API_PREFIX }}" ]; then
+            echo "API_PREFIX=${{ secrets.API_PREFIX }}" >> "$GITHUB_ENV"
+          else
+            CANDIDATES=("" "/api" "/api/v1")
+            FOUND=""
+            for p in "${CANDIDATES[@]}"; do
+              code=$(curl -s -o /dev/null -w "%{http_code}" \
+                -X POST "${BASE_URL}${p}/auth/login" \
+                -H "Content-Type: application/json" \
+                -d "{}")
+              if [ "$code" != "404" ] && [ "$code" != "000" ]; then
+                FOUND="$p"
+                break
+              fi
+            done
+            if [ -n "$FOUND" ]; then
+              echo "API_PREFIX=$FOUND" >> "$GITHUB_ENV"
+            else
+              echo "API_PREFIX=${DEFAULT_API_PREFIX}" >> "$GITHUB_ENV"
+            fi
+          fi
+          echo "Using API_PREFIX='${API_PREFIX:-$DEFAULT_API_PREFIX}'"
+
+      - name: Resolve route paths
+        run: |
+          LOGIN_CANDIDATES=(
+            "/auth/login"
+            "/api/auth/login"
+            "/api/v1/auth/login"
+            "/users/login"
+            "/api/users/login"
+            "${API_PREFIX}/auth/login"
+          )
+          JOBS_CANDIDATES=(
+            "/jobs"
+            "/api/jobs"
+            "/api/v1/jobs"
+            "${API_PREFIX}/jobs"
+          )
+
+          LOGIN_PATH=""
+          for p in "${LOGIN_CANDIDATES[@]}"; do
+            clean=$(echo "$p" | sed 's#//*#/#g')
+            code=$(curl -s -o /dev/null -w "%{http_code}" \
+              -X POST "${BASE_URL}${clean}" \
+              -H "Content-Type: application/json" \
+              -d "{}")
+            if [ "$code" != "404" ] && [ "$code" != "000" ]; then
+              LOGIN_PATH="$clean"
+              break
+            fi
+          done
+          if [ -z "$LOGIN_PATH" ]; then
+            LOGIN_PATH="/auth/login"
+          fi
+
+          JOBS_PATH=""
+          for p in "${JOBS_CANDIDATES[@]}"; do
+            clean=$(echo "$p" | sed 's#//*#/#g')
+            code=$(curl -s -o /dev/null -w "%{http_code}" \
+              "${BASE_URL}${clean}")
+            if [ "$code" != "404" ] && [ "$code" != "000" ]; then
+              JOBS_PATH="$clean"
+              break
+            fi
+          done
+          if [ -z "$JOBS_PATH" ]; then
+            JOBS_PATH="/jobs"
+          fi
+
+          echo "AUTH_LOGIN_PATH=${LOGIN_PATH}" >> "$GITHUB_ENV"
+          echo "JOBS_PATH=${JOBS_PATH}" >> "$GITHUB_ENV"
+          echo "Using AUTH_LOGIN_PATH=${LOGIN_PATH}"
+          echo "Using JOBS_PATH=${JOBS_PATH}"
+
+      - name: Resolve smoke strictness
+        run: |
+          if [ -n "${{ secrets.STRICT_SMOKE }}" ]; then
+            echo "STRICT_SMOKE=${{ secrets.STRICT_SMOKE }}" >> "$GITHUB_ENV"
+          else
+            echo "STRICT_SMOKE=${DEFAULT_STRICT_SMOKE}" >> "$GITHUB_ENV"
+          fi
+          echo "Using STRICT_SMOKE=${STRICT_SMOKE:-$DEFAULT_STRICT_SMOKE}"
+
+      - name: Verify deployment is reachable
+        run: |
+          code=$(curl -s -o /dev/null -w "%{http_code}" "${BASE_URL}/")
+          echo "Root status code: ${code}"
+          if [ "$code" -ge 500 ] || [ "$code" = "000" ]; then
+            echo "Deployment is not reachable or unhealthy."
+            exit 1
+          fi
+
+      - name: Run Postman collection
+        run: |
+          mkdir -p newman
+          newman run postman/candidate-portal-smoke.postman_collection.json \
+            -e postman/candidate-portal-railway.postman_environment.json \
+            --env-var baseUrl="${BASE_URL}" \
+            --env-var apiPrefix="${API_PREFIX}" \
+            --env-var authLoginPath="${AUTH_LOGIN_PATH}" \
+            --env-var jobsPath="${JOBS_PATH}" \
+            --env-var testEmail="${{ secrets.TEST_EMAIL }}" \
+            --env-var testPassword="${{ secrets.TEST_PASSWORD }}" \
+            --env-var strictSmoke="${STRICT_SMOKE}" \
+            --reporters cli,junit \
+            --reporter-junit-export newman/results.xml
+
+      - name: Upload Newman report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: newman-results
+          path: newman/results.xml

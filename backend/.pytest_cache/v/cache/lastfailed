@@ -1,0 +1,5 @@
+{
+  "tests/test_api_smoke.py::test_openapi_json_available": true,
+  "tests/test_api_smoke.py::test_docs_or_redoc_available": true,
+  "tests/test_api_smoke.py::test_health_endpoint_if_present": true
+}
