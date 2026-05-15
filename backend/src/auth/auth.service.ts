@@ -1,5 +1,5 @@
 import { Injectable, BadRequestException, UnauthorizedException } from '@nestjs/common';
-import { randomBytes } from 'crypto';
+import { randomBytes, randomInt } from 'crypto';
 import { Resend } from 'resend';
 import { UsersService } from '../users/users.service';
 import { SmsService } from '../sms/sms.service';
@@ -38,7 +38,7 @@ export class AuthService {
   async sendOtp(email: string, data?: any) {
     if (!email) throw new BadRequestException('Email is required.');
 
-    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const otp = randomInt(100000, 1000000).toString();
     this.otpStore.set(email, {
       otp,
       expires: Date.now() + 5 * 60 * 1000,
