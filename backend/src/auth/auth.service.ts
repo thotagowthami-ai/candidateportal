@@ -45,7 +45,7 @@ export class AuthService {
       data,
     });
 
-    console.log('Sending OTP:', otp);
+    console.log(`Sending OTP for email: ${email}`);
 
     try {
       await this.resend.emails.send({
