@@ -35,6 +35,7 @@ type UserRow = {
   email_verified: boolean;
   created_at: string;
   updated_at: string;
+  last_login: string | null;
 };
 
 @Injectable()
@@ -369,6 +370,15 @@ export class UsersService {
         }
       }
 
+      // Update last_login timestamp for Google login
+      await this.pool.query(
+        `UPDATE users SET last_login = now() WHERE email = $1`,
+        [normalizedEmail],
+      );
+
+      // Re-fetch to include the updated last_login
+      userWithResume = await this.getCurrentUser(normalizedEmail);
+
       const accessToken = await this.jwtService.signAsync({
         sub: userWithResume.id,
         email: userWithResume.email,
@@ -430,6 +440,7 @@ export class UsersService {
       summary: updateData.summary || existingParsed.summary,
       // --- THIS LINE ENSURES SKILLS ARE PERMANENTLY SAVED ---
       skills: updateData.skills || existingParsed.skills,
+      education: updateData.education || existingParsed.education,
     };
 
     await this.pool.query(
@@ -441,9 +452,15 @@ export class UsersService {
   }
 
   async login(email: string) {
-    const userWithResume = await this.getCurrentUser(
-      email.trim().toLowerCase(),
+    const normalizedEmail = email.trim().toLowerCase();
+
+    // Update last_login timestamp
+    await this.pool.query(
+      `UPDATE users SET last_login = now() WHERE email = $1`,
+      [normalizedEmail],
     );
+
+    const userWithResume = await this.getCurrentUser(normalizedEmail);
 
     const accessToken = await this.jwtService.signAsync({
       sub: userWithResume.id,
@@ -556,10 +573,9 @@ export class UsersService {
       throw new NotFoundException('User not found. Please register first.');
     }
 
+    const mapped = this.mapUser(row);
     return {
-      firstName: row.first_name,
-      lastName: row.last_name,
-      email: row.email,
+      ...mapped,
       resumeParsed: row.resume_parsed ?? {
         emails: [],
         phones: [],
@@ -588,7 +604,8 @@ export class UsersService {
         resume_parsed JSONB,
         email_verified BOOLEAN NOT NULL DEFAULT FALSE,
         created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-        updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        last_login TIMESTAMPTZ
       );
     `);
 
@@ -601,6 +618,15 @@ export class UsersService {
       )
       .catch(() => {
         /* Ignore errors if column doesn't exist yet */
+      });
+
+    // Add last_login column for existing tables
+    await this.pool
+      .query(
+        `ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login TIMESTAMPTZ;`,
+      )
+      .catch(() => {
+        /* Ignore if column already exists */
       });
   }
 
@@ -619,6 +645,7 @@ export class UsersService {
       emailVerified: row.email_verified,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
+      lastLogin: row.last_login,
     };
   }
 

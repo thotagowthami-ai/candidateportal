@@ -31,6 +31,9 @@ export class UpdateProfileDto {
 
   @IsOptional()
   @IsArray()
-  @IsString({ each: true })
   skills?: string[];
+
+  @IsOptional()
+  @IsArray()
+  education?: any[];
 }

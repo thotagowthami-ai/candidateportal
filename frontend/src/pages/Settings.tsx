@@ -8,6 +8,8 @@ type LoggedInUser = {
   email?: string;
   mobile?: string;
   skills?: string[] | string;
+  updatedAt?: string;
+  lastLogin?: string;
 };
 
 type StatusMessage = {
@@ -49,7 +51,7 @@ export default function Settings() {
   }, [parsedUser.skills]);
 
   const [activeTab, setActiveTab] = useState<
-    "profile" | "contact" | "skills" | "privacy"
+    "profile" | "contact" | "education" | "skills" | "privacy"
   >("profile");
   const [status, setStatus] = useState<StatusMessage | null>(null);
 
@@ -78,6 +80,17 @@ export default function Settings() {
   const [skillDraft, setSkillDraft] = useState("");
   const [visibility, setVisibility] = useState(true);
   const [searchable, setSearchable] = useState(true);
+  const [metadata, setMetadata] = useState({
+    updatedAt: "",
+    lastLogin: "",
+  });
+
+  const [education, setEducation] = useState<any[]>([]);
+  const [eduDraft, setEduDraft] = useState({
+    degree: "",
+    institution: "",
+    year: "",
+  });
 
   // --- REUSABLE FETCH FUNCTION ---
   const loadProfileData = async () => {
@@ -124,6 +137,15 @@ export default function Settings() {
         parsed.skills.length > 0
       ) {
         setSkills(parsed.skills);
+      }
+
+      setMetadata({
+        updatedAt: realData.updatedAt || "",
+        lastLogin: realData.lastLogin || "",
+      });
+
+      if (parsed.education && Array.isArray(parsed.education)) {
+        setEducation(parsed.education);
       }
     } catch (error) {
       console.error("Failed to load real profile data", error);
@@ -302,6 +324,45 @@ export default function Settings() {
     }
   };
 
+  // --- EDUCATION LOGIC ---
+  const handleAddEducation = async () => {
+    if (!eduDraft.degree || !eduDraft.institution) {
+      setMessage("error", "Degree and Institution are required.");
+      return;
+    }
+
+    const updatedEdu = [...education, eduDraft];
+    setEducation(updatedEdu);
+    setEduDraft({ degree: "", institution: "", year: "" });
+
+    try {
+      await api.post("/users/update-profile", {
+        ...profile,
+        education: updatedEdu,
+      });
+      setMessage("success", "Education added and saved.");
+    } catch (error) {
+      console.error("Failed to save education", error);
+      setMessage("error", "Failed to sync education with server.");
+    }
+  };
+
+  const handleRemoveEducation = async (index: number) => {
+    const updatedEdu = education.filter((_, i) => i !== index);
+    setEducation(updatedEdu);
+
+    try {
+      await api.post("/users/update-profile", {
+        ...profile,
+        education: updatedEdu,
+      });
+      setMessage("success", "Education entry removed.");
+    } catch (error) {
+      console.error("Failed to remove education", error);
+      setMessage("error", "Failed to sync deletion with server.");
+    }
+  };
+
   const renderToast = () => {
     if (!status) return null;
     
@@ -350,6 +411,28 @@ export default function Settings() {
     );
   };
 
+  const formatDate = (dateString: string | null | undefined) => {
+    if (!dateString) return "N/A";
+    try {
+      const date = new Date(dateString);
+      if (isNaN(date.getTime())) return "N/A";
+      
+      const parts = new Intl.DateTimeFormat("en-GB", {
+        day: "numeric",
+        month: "short",
+        year: "numeric",
+      }).formatToParts(date);
+      
+      const day = parts.find(p => p.type === "day")?.value;
+      const month = parts.find(p => p.type === "month")?.value;
+      const year = parts.find(p => p.type === "year")?.value;
+      
+      return `${day} ${month}, ${year}`;
+    } catch {
+      return "N/A";
+    }
+  };
+
   return (
     <div className="min-h-screen bg-surface font-inter text-on-surface px-4 py-10 selection:bg-primary-container/30">
       <div className="mx-auto w-full max-w-6xl space-y-6 animate-in fade-in slide-in-from-bottom duration-700">
@@ -365,11 +448,30 @@ export default function Settings() {
               Settings
             </div>
             <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-              <div>
-                <h1 className="text-2xl font-space font-bold text-on-surface">My Profile Settings</h1>
-                <p className="text-sm text-on-surface_variant font-light mt-1">
-                  Manage your profile details, contact information, and skills.
-                </p>
+              <div className="flex-1">
+                <div className="flex flex-col md:flex-row md:items-baseline md:justify-between gap-4">
+                  <div>
+                    <h1 className="text-2xl font-space font-bold text-on-surface">My Profile Settings</h1>
+                    <p className="text-sm text-on-surface_variant font-light mt-1">
+                      Manage your profile details, contact information, and skills.
+                    </p>
+                  </div>
+                  
+                  <div className="flex flex-col items-end text-right gap-1 md:mt-0 mt-2">
+                    <div className="flex items-center gap-2 text-on-surface_variant/60">
+                      <span className="text-[10px] font-bold uppercase tracking-wider">Profile last updated</span>
+                      <span className="text-xs font-space font-bold text-on-surface">
+                        {formatDate(metadata.updatedAt)}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2 text-on-surface_variant/40">
+                      <span className="text-[10px] font-bold uppercase tracking-wider">Last login</span>
+                      <span className="text-xs font-space font-medium">
+                        {formatDate(metadata.lastLogin)}
+                      </span>
+                    </div>
+                  </div>
+                </div>
               </div>
               <div className="flex flex-wrap gap-3">
                 <button
@@ -411,6 +513,7 @@ export default function Settings() {
                 {[
                   { id: "profile", label: "Profile Details" },
                   { id: "contact", label: "Email & Mobile" },
+                  { id: "education", label: "Education Details" },
                   { id: "skills", label: "Skills Parsing" },
                   { id: "privacy", label: "Privacy & Visibility" },
                 ].map((item) => (
@@ -419,7 +522,7 @@ export default function Settings() {
                     type="button"
                     onClick={() =>
                       setActiveTab(
-                        item.id as "profile" | "contact" | "skills" | "privacy"
+                        item.id as "profile" | "contact" | "education" | "skills" | "privacy"
                       )
                     }
                     className={`flex w-full items-center justify-between rounded-md px-3 py-2.5 text-left text-sm font-semibold transition-all ${
@@ -673,6 +776,89 @@ export default function Settings() {
                     </div>
                   </div>
                 )}
+              </section>
+            )}
+
+            {activeTab === "education" && (
+              <section className="rounded-2xl border border-outline-variant bg-surface-container-lowest p-8 relative overflow-hidden">
+                <div className="flex flex-col gap-1 relative z-10">
+                  <h2 className="text-xl font-space font-bold text-on-surface">Education Details</h2>
+                  <p className="text-sm text-on-surface_variant font-light leading-relaxed max-w-xl">
+                    Add your academic background to strengthen your profile.
+                  </p>
+                </div>
+
+                <div className="mt-8 space-y-4 relative z-10">
+                  {education.map((edu, index) => (
+                    <div
+                      key={index}
+                      className="group flex flex-col gap-2 rounded-xl border border-outline-variant bg-surface-container-low p-4 transition-all hover:bg-surface-container-high relative"
+                    >
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveEducation(index)}
+                        className="absolute top-4 right-4 p-1.5 rounded-lg text-on-surface_variant/40 hover:text-red-500 hover:bg-red-500/5 transition-all"
+                      >
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                        </svg>
+                      </button>
+                      
+                      <div className="pr-10">
+                        <p className="text-sm font-bold text-on-surface">{edu.degree}</p>
+                        <p className="text-xs text-on-surface_variant mt-0.5">{edu.institution}</p>
+                        {edu.year && (
+                          <p className="text-[10px] font-mono text-primary mt-1 uppercase tracking-wider">{edu.year}</p>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                  {education.length === 0 && (
+                    <p className="text-sm text-on-surface_variant font-light italic text-center py-6 bg-surface-container-low/50 rounded-xl border border-dashed border-outline-variant">
+                      No education details added yet.
+                    </p>
+                  )}
+                </div>
+
+                <div className="mt-8 pt-8 border-t border-outline-variant relative z-10">
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface_variant/60 mb-4">Add New Education</p>
+                  <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-bold uppercase tracking-widest text-on-surface_variant/40 pl-1">Degree / Certification</label>
+                      <input
+                        value={eduDraft.degree}
+                        onChange={(e) => setEduDraft(prev => ({ ...prev, degree: e.target.value }))}
+                        placeholder="e.g. B.Tech Computer Science"
+                        className="w-full rounded-md bg-surface-container-low px-4 py-3 text-sm text-on-surface placeholder:text-on-surface_variant/30 outline-none transition-all duration-300 border-2 border-transparent focus:border-primary-container focus:bg-surface-bright"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-bold uppercase tracking-widest text-on-surface_variant/40 pl-1">Institution</label>
+                      <input
+                        value={eduDraft.institution}
+                        onChange={(e) => setEduDraft(prev => ({ ...prev, institution: e.target.value }))}
+                        placeholder="e.g. Stanford University"
+                        className="w-full rounded-md bg-surface-container-low px-4 py-3 text-sm text-on-surface placeholder:text-on-surface_variant/30 outline-none transition-all duration-300 border-2 border-transparent focus:border-primary-container focus:bg-surface-bright"
+                      />
+                    </div>
+                    <div className="space-y-1.5 md:col-span-2">
+                      <label className="text-[10px] font-bold uppercase tracking-widest text-on-surface_variant/40 pl-1">Year (Optional)</label>
+                      <input
+                        value={eduDraft.year}
+                        onChange={(e) => setEduDraft(prev => ({ ...prev, year: e.target.value }))}
+                        placeholder="e.g. 2018 - 2022"
+                        className="w-full rounded-md bg-surface-container-low px-4 py-3 text-sm text-on-surface placeholder:text-on-surface_variant/30 outline-none transition-all duration-300 border-2 border-transparent focus:border-primary-container focus:bg-surface-bright"
+                      />
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleAddEducation}
+                    className="mt-6 w-full rounded-md btn-gradient px-6 py-3 text-sm font-bold tracking-wide shadow-lg shadow-primary/10 active:scale-[0.98] transition-all"
+                  >
+                    Add Education Entry
+                  </button>
+                </div>
               </section>
             )}
 
