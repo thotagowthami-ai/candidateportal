@@ -2,6 +2,7 @@ import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { AppModule } from './app.module';
 import * as express from 'express';
+import rateLimit from 'express-rate-limit';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
@@ -9,17 +10,36 @@ async function bootstrap() {
     .split(',')
     .map((origin) => origin.trim())
     .filter(Boolean);
+
+  const previewOrigins = (process.env.CORS_ALLOWED_PREVIEWS || '')
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+
   const defaultOrigins = [
     'http://localhost:5173',
     'http://localhost:3000',
     'https://candidateportal-dmx4.vercel.app',
   ];
-  const allowedOrigins = new Set([...defaultOrigins, ...configuredOrigins]);
-  const allowVercelPreviews =
-    (process.env.CORS_ALLOW_VERCEL_PREVIEWS || 'true').toLowerCase() === 'true';
+  const allowedOrigins = new Set([
+    ...defaultOrigins,
+    ...configuredOrigins,
+    ...previewOrigins,
+  ]);
 
-  app.use(express.json({ limit: '15mb' }));
-  app.use(express.urlencoded({ limit: '15mb', extended: true }));
+  const trustNullOrigin =
+    (process.env.TRUST_NULL_ORIGIN || 'false').toLowerCase() === 'true';
+
+  const limiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 100, // Limit each IP to 100 requests per windowMs
+    standardHeaders: true,
+    legacyHeaders: false,
+  });
+
+  app.use(limiter);
+  app.use(express.json({ limit: '2mb' }));
+  app.use(express.urlencoded({ limit: '2mb', extended: true }));
 
   app.setGlobalPrefix('api', {
     exclude: ['/'],
@@ -27,24 +47,20 @@ async function bootstrap() {
 
   app.enableCors({
     origin: (origin, callback) => {
-      if (!origin || allowedOrigins.has(origin)) {
+      // Allow non-browser requests
+      if (!origin) {
         callback(null, true);
         return;
       }
 
-      if (allowVercelPreviews) {
-        try {
-          const host = new URL(origin).hostname;
-          if (host.endsWith('.vercel.app')) {
-            callback(null, true);
-            return;
-          }
-        } catch {
-          // Invalid origin format, reject below.
-        }
+      // Exact string match for allowed origins
+      if (allowedOrigins.has(origin)) {
+        callback(null, true);
+        return;
       }
 
-      if (origin === 'null') {
+      // Explicit flag for 'null' origin
+      if (origin === 'null' && trustNullOrigin) {
         callback(null, true);
         return;
       }

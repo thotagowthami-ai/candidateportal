@@ -2,6 +2,7 @@ import { Global, Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Pool } from 'pg';
 import { PG_POOL } from './database.constants';
+import { TokenStoreService } from './token-store.service';
 
 @Global()
 @Module({
@@ -26,10 +27,18 @@ import { PG_POOL } from './database.constants';
           : configService.get<string>('PGDATABASE', 'candidateportal');
         console.log('DB name at runtime:', dbName);
 
+        const sslEnabled =
+          configService.get<string>('PG_SSL', 'true') === 'true';
+        const rejectUnauthorized =
+          configService.get<string>('PG_SSL_REJECT_UNAUTHORIZED', 'true') ===
+          'true';
+
+        const ssl = sslEnabled ? { rejectUnauthorized } : false;
+
         if (connectionString?.trim()) {
           return new Pool({
             connectionString,
-            ssl: { rejectUnauthorized: false },
+            ssl,
           });
         }
 
@@ -39,10 +48,12 @@ import { PG_POOL } from './database.constants';
           user: configService.get<string>('PGUSER', 'postgres'),
           password: configService.get<string>('PGPASSWORD', 'postgres'),
           database: configService.get<string>('PGDATABASE', 'candidateportal'),
+          ssl,
         });
       },
     },
+    TokenStoreService,
   ],
-  exports: [PG_POOL],
+  exports: [PG_POOL, TokenStoreService],
 })
 export class DatabaseModule {}

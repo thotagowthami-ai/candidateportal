@@ -6,6 +6,7 @@ import {
   UseGuards,
   Request,
   UnauthorizedException,
+  BadRequestException,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import * as multer from 'multer';
@@ -21,12 +22,18 @@ export class UploadsController {
   @UseInterceptors(
     FileInterceptor('file', {
       storage: multer.memoryStorage(),
+      limits: {
+        fileSize: 10 * 1024 * 1024, // 10 MB limit
+      },
     }),
   )
   uploadResume(
     @UploadedFile() file: Express.Multer.File,
     @Request() req: { user: { id?: string; sub?: string } },
   ) {
+    if (!file) {
+      throw new BadRequestException('File is required');
+    }
     const userId = req.user?.id ?? req.user?.sub;
     if (!userId) {
       throw new UnauthorizedException('Missing user identity');

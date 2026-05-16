@@ -1,24 +1,32 @@
 import { Injectable } from '@nestjs/common';
-// Change 1: Import the Twilio class directly
+import { ConfigService } from '@nestjs/config';
 import { Twilio } from 'twilio';
 
 @Injectable()
 export class SmsService {
   private client: Twilio;
+  private readonly fromNumber: string;
 
-  constructor() {
-    // Change 2: Use the 'new' keyword and the Twilio class
-    this.client = new Twilio(
-      process.env.TWILIO_ACCOUNT_SID, 
-      process.env.TWILIO_AUTH_TOKEN
-    );
+  constructor(private readonly configService: ConfigService) {
+    const accountSid = this.configService.get<string>('TWILIO_ACCOUNT_SID');
+    const authToken = this.configService.get<string>('TWILIO_AUTH_TOKEN');
+    const from = this.configService.get<string>('TWILIO_PHONE_NUMBER');
+
+    if (!accountSid || !authToken || !from) {
+      throw new Error(
+        'Missing Twilio environment variables: TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, or TWILIO_PHONE_NUMBER',
+      );
+    }
+
+    this.client = new Twilio(accountSid, authToken);
+    this.fromNumber = from;
   }
 
   async sendCandidateSMS(phone: string, messageBody: string) {
     try {
       const message = await this.client.messages.create({
         body: messageBody,
-        from: process.env.TWILIO_PHONE_NUMBER,
+        from: this.fromNumber,
         to: phone,
       });
       return { success: true, messageSid: message.sid };

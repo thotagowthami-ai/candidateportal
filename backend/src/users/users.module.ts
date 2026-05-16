@@ -10,20 +10,26 @@ import { UploadsModule } from '../uploads/uploads.module';
 import { JwtStrategy } from './jwt.strategy';
 import { ResumeParserService } from './resume-parser.service';
 // 1. ADD THIS IMPORT
-import { SmsModule } from '../sms/sms.module'; 
+import { SmsModule } from '../sms/sms.module';
 
 @Module({
   imports: [
     UploadsModule,
     // 2. ADD SmsModule HERE
-    SmsModule, 
+    SmsModule,
     PassportModule.register({ defaultStrategy: 'jwt' }),
     JwtModule.registerAsync({
       inject: [ConfigService],
-      useFactory: (configService: ConfigService) => ({
-        secret: configService.get<string>('JWT_SECRET') || 'dev_jwt_secret',
-        signOptions: { expiresIn: '1d' },
-      }),
+      useFactory: (configService: ConfigService) => {
+        const secret = configService.get<string>('JWT_SECRET');
+        if (!secret) {
+          throw new Error('JWT_SECRET environment variable is missing');
+        }
+        return {
+          secret,
+          signOptions: { expiresIn: '1d' },
+        };
+      },
     }),
   ],
   controllers: [UsersController],

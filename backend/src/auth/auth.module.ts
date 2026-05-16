@@ -11,19 +11,4 @@ import { GoogleStrategy } from './google.strategy';
   controllers: [AuthController],
   providers: [AuthService, GoogleStrategy],
 })
-export class AuthModule {
-  constructor() {
-    console.log(
-      'GOOGLE_CLIENT_ID:',
-      process.env.GOOGLE_CLIENT_ID ? '✅ loaded' : '❌ MISSING',
-    );
-    console.log(
-      'GOOGLE_CLIENT_SECRET:',
-      process.env.GOOGLE_CLIENT_SECRET ? '✅ loaded' : '❌ MISSING',
-    );
-    console.log(
-      'GOOGLE_REDIRECT_URI:',
-      process.env.GOOGLE_REDIRECT_URI ? '✅ loaded' : '❌ MISSING',
-    );
-  }
-}
+export class AuthModule {}

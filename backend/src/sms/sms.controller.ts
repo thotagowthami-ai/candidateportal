@@ -31,8 +31,9 @@ export class SmsController {
     if (result.success) {
       return { message: 'SMS sent successfully!', sid: result.messageSid };
     } else {
+      console.error('SMS sending failed:', result.error);
       throw new HttpException(
-        { error: 'Failed to send SMS', details: result.error },
+        { error: 'Failed to send SMS', details: 'Internal provider error' },
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }

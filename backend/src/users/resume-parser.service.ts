@@ -122,6 +122,9 @@ export class ResumeParserService {
       };
     } catch (e) {
       console.error('RESUME PARSE ERROR', e);
+      if (e instanceof BadRequestException) {
+        throw e;
+      }
       throw new BadRequestException(
         'Failed to parse PDF resume. Use a text-based PDF.',
       );
@@ -131,7 +134,7 @@ export class ResumeParserService {
   private async extractText(file: Express.Multer.File): Promise<string> {
     const lowerName = (file.originalname || '').toLowerCase();
     console.debug(
-      `ResumeParser: extracting text from file="${file.originalname}", mime="${file.mimetype}", size=${file.size}`,
+      `ResumeParser: extracting text, mime="${file.mimetype}", size=${file.size}`,
     );
 
     if (file.mimetype === 'application/pdf' || lowerName.endsWith('.pdf')) {
@@ -259,7 +262,10 @@ export class ResumeParserService {
 
     for (const skill of this.knownSkills) {
       const escaped = skill.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      const matcher = new RegExp(`\\b${escaped}\\b`, 'i');
+      const matcher = new RegExp(
+        `(?<![A-Za-z0-9_])${escaped}(?![A-Za-z0-9_])`,
+        'iu',
+      );
       if (matcher.test(normalized)) {
         found.push(this.toDisplaySkill(skill));
       }

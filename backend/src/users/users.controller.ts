@@ -19,6 +19,7 @@ import * as multer from 'multer';
 import { UsersService } from './users.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { LoginUserDto } from './dto/login-user.dto';
+import { UpdateProfileDto } from './dto/update-profile.dto';
 import type { Express, Response } from 'express';
 
 @Controller('users')
@@ -27,7 +28,6 @@ export class UsersController {
 
   @Post('login')
   async login(@Body() body: LoginUserDto) {
-    console.log('LOGIN REQUEST BODY', body);
     return this.usersService.login(body.email);
   }
 
@@ -64,14 +64,14 @@ export class UsersController {
   @UseGuards(AuthGuard('jwt'))
   async updateProfile(
     @Req() req: { user: { email: string } },
-    @Body() body: any,
+    @Body() body: UpdateProfileDto,
   ) {
     return this.usersService.updateProfile(req.user.email, body);
   }
   @Post('send-otp')
   @UseGuards(AuthGuard('jwt'))
   async sendOtp(@Body('phone') phone: string) {
-    if (!phone) throw new UnauthorizedException('Phone number required');
+    if (!phone) throw new BadRequestException('Phone number required');
     return this.usersService.sendOtp(phone);
   }
 
@@ -79,7 +79,7 @@ export class UsersController {
   @UseGuards(AuthGuard('jwt'))
   async verifyOtp(@Body() body: { phone: string; otp: string }) {
     if (!body.phone || !body.otp) {
-      throw new UnauthorizedException('Phone number and OTP required');
+      throw new BadRequestException('Phone number and OTP required');
     }
     return this.usersService.verifyOtp(body.phone, body.otp);
   }
@@ -88,9 +88,9 @@ export class UsersController {
   @Post('upload')
   @UseGuards(AuthGuard('jwt')) // Ensure the user is logged in
   @UseInterceptors(
-    FileInterceptor('resume', {
-      // Note: we named it 'file' in Settings.tsx FormData
+    FileInterceptor('file', {
       storage: multer.memoryStorage(),
+      limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
     }),
   )
   async replaceResume(
@@ -108,8 +108,9 @@ export class UsersController {
 
   @Post('create')
   @UseInterceptors(
-    FileInterceptor('resume', {
+    FileInterceptor('file', {
       storage: multer.memoryStorage(),
+      limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
     }),
   )
   async createUser(
@@ -120,6 +121,7 @@ export class UsersController {
   }
 
   @Post('test-create')
+  @UseGuards(AuthGuard('jwt'))
   async testCreate(
     @Body()
     payload: {
@@ -131,8 +133,11 @@ export class UsersController {
       resumeUrl?: string;
     },
   ) {
-    if (process.env.DEV_BYPASS_OTP !== 'true') {
-      throw new UnauthorizedException('Dev bypass not enabled');
+    if (
+      process.env.NODE_ENV === 'production' ||
+      process.env.DEV_BYPASS_OTP !== 'true'
+    ) {
+      throw new UnauthorizedException('Dev bypass not enabled or allowed');
     }
     return this.usersService.devCreateTestUser(payload);
   }

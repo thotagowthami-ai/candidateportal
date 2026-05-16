@@ -4,9 +4,11 @@ import {
   Inject,
   NotFoundException,
   UnauthorizedException,
+  BadGatewayException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
-import { randomInt } from 'crypto';
-import { Express, Response } from 'express';
+import { createHash, randomInt } from 'crypto';
+import { Express, Response as ExpressResponse } from 'express';
 import { JwtService } from '@nestjs/jwt';
 import { Pool } from 'pg';
 import { PG_POOL } from '../database/database.constants';
@@ -17,6 +19,7 @@ import type { ResumeParsed } from './schemas/user.schema';
 
 // --- NEW: Import SmsService ---
 import { SmsService } from '../sms/sms.service';
+import { TokenStoreService } from '../database/token-store.service';
 
 type UserRow = {
   id: string;
@@ -38,20 +41,20 @@ type UserRow = {
 export class UsersService {
   private readonly schemaReady: Promise<void>;
 
-  // --- NEW: In-memory OTP Store ---
-  // In production, consider using Redis or PostgreSQL for this.
-  private otpStore = new Map<string, { code: string; expiresAt: number }>();
-
   constructor(
     @Inject(PG_POOL)
     private readonly pool: Pool,
     private readonly uploadsService: UploadsService,
     private readonly jwtService: JwtService,
     private readonly resumeParserService: ResumeParserService,
-    // --- NEW: Inject SmsService ---
     private readonly smsService: SmsService,
+    private readonly tokenStore: TokenStoreService,
   ) {
     this.schemaReady = this.ensureSchema();
+  }
+
+  private hashOtp(otp: string): string {
+    return createHash('sha256').update(otp).digest('hex');
   }
 
   // --- NEW: TWILIO OTP LOGIC ---
@@ -59,9 +62,13 @@ export class UsersService {
     // 1. Generate a random 4-digit code
     const otpCode = randomInt(1000, 10000).toString();
 
-    // 2. Store the OTP in memory (expires in 10 minutes)
-    const expiresAt = Date.now() + 10 * 60 * 1000;
-    this.otpStore.set(phone, { code: otpCode, expiresAt });
+    // 2. Store the hashed OTP in PostgreSQL (expires in 10 minutes)
+    const hashedOtp = this.hashOtp(otpCode);
+    await this.tokenStore.set(
+      `user_otp:${phone}`,
+      { hash: hashedOtp, attempts: 0 },
+      10 * 60,
+    );
 
     console.log(`Generated OTP for ${phone}`);
 
@@ -79,8 +86,9 @@ export class UsersService {
   }
 
   async verifyOtp(phone: string, otp: string) {
+    const key = `user_otp:${phone}`;
     // 1. Check if the OTP exists for this phone number
-    const record = this.otpStore.get(phone);
+    const record = await this.tokenStore.get(key);
 
     if (!record) {
       throw new BadRequestException(
@@ -88,117 +96,117 @@ export class UsersService {
       );
     }
 
-    // 2. Check if it expired
-    if (Date.now() > record.expiresAt) {
-      this.otpStore.delete(phone);
+    // 2. Check if too many attempts
+    if (record.attempts >= 5) {
+      await this.tokenStore.delete(key);
       throw new BadRequestException(
-        'OTP has expired. Please request a new one.',
+        'Too many invalid OTP attempts. Please request a new one.',
       );
     }
 
-    // 3. Check if the code matches
-    if (record.code !== otp) {
+    // 3. Check if the code matches (compare hashes)
+    if (record.hash !== this.hashOtp(otp)) {
+      // Increment attempts and persist
+      record.attempts = (record.attempts || 0) + 1;
+
+      if (record.attempts >= 5) {
+        await this.tokenStore.delete(key);
+        throw new BadRequestException(
+          'Too many invalid OTP attempts. Please request a new one.',
+        );
+      }
+
+      // We don't have an easy way to get "remaining TTL" from tokenStore.get
+      // but we can just use a fixed 10 min from now, or better, the tokenStore
+      // implementation should ideally handle TTL updates if we want to be precise.
+      // For now, we'll reset to 10 mins as a reasonable compromise for the updated attempts.
+      await this.tokenStore.set(key, record, 10 * 60);
+
       throw new BadRequestException('Invalid OTP code.');
     }
 
     // 4. Success! Delete the OTP so it can't be used again
-    this.otpStore.delete(phone);
+    await this.tokenStore.delete(key);
     return { success: true, message: 'Phone number verified successfully' };
   }
   // -----------------------------
 
   async create(body: CreateUserDto, file: Express.Multer.File) {
     await this.schemaReady;
-    const dbInfo = await this.pool.query(`
-      SELECT current_database() AS db,
-             current_schema() AS schema,
-             inet_server_addr() AS host,
-             inet_server_port() AS port,
-             current_user AS user;
-    `);
-    console.log('DB INFO:', dbInfo.rows[0]);
-    const cols = await this.pool.query(`
-      SELECT column_name
-      FROM information_schema.columns
-      WHERE table_schema = 'public'
-        AND table_name = 'users'
-        AND column_name IN ('resume_text','resume_parsed')
-      ORDER BY column_name;
-    `);
-    console.log('DB COLS:', cols.rows);
-
     if (!file) {
       throw new BadRequestException('Resume file required');
     }
     console.debug(
-      `Resume upload: file=${file.originalname} mime=${file.mimetype} size=${file.size} bytes`,
+      `Resume upload: mime=${file.mimetype} size=${file.size} bytes`,
     );
     if (file.mimetype && !file.mimetype.includes('pdf')) {
       throw new BadRequestException('Please upload a text-based PDF resume.');
     }
-    if (file.buffer && file.buffer.length > 0) {
-      const snippet = file.buffer.toString(
-        'utf8',
-        0,
-        Math.min(8000, file.buffer.length),
-      );
-      const hasText = /[A-Za-z0-9]/.test(snippet);
-      if (!hasText) {
-        throw new BadRequestException('Please upload a text-based PDF resume.');
-      }
-    }
-
     const normalizedEmail = body.email.trim().toLowerCase();
 
     const { resumeText, resumeParsed } =
       await this.resumeParserService.parseFromFile(file);
 
-    const insertQuery = `
-      INSERT INTO users (
-        first_name,
-        middle_name,
-        last_name,
-        email,
-        phone,
-        resume_text,
-        resume_parsed,
-        email_verified
-      )
-      VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,TRUE)
-      ON CONFLICT (email)
-      DO UPDATE SET
-        first_name = EXCLUDED.first_name,
-        middle_name = EXCLUDED.middle_name,
-        last_name = EXCLUDED.last_name,
-        phone = EXCLUDED.phone,
-        resume_text = EXCLUDED.resume_text,
-        resume_parsed = EXCLUDED.resume_parsed,
-        email_verified = TRUE,
-        updated_at = now()
-      RETURNING *;
-    `;
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
 
-    const result = await this.pool.query<UserRow>(insertQuery, [
-      body.firstName,
-      body.middleName || null,
-      body.lastName,
-      normalizedEmail,
-      body.phone,
-      resumeText,
-      JSON.stringify(resumeParsed),
-    ]);
+      const insertQuery = `
+        INSERT INTO users (
+          first_name,
+          middle_name,
+          last_name,
+          email,
+          phone,
+          resume_text,
+          resume_parsed,
+          email_verified
+        )
+        VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,TRUE)
+        ON CONFLICT (email)
+        DO UPDATE SET
+          first_name = EXCLUDED.first_name,
+          middle_name = EXCLUDED.middle_name,
+          last_name = EXCLUDED.last_name,
+          phone = EXCLUDED.phone,
+          resume_text = EXCLUDED.resume_text,
+          resume_parsed = EXCLUDED.resume_parsed,
+          email_verified = TRUE,
+          updated_at = now()
+        RETURNING *;
+      `;
 
-    const userId = result.rows[0].id;
+      const result = await client.query<UserRow>(insertQuery, [
+        body.firstName,
+        body.middleName || null,
+        body.lastName,
+        normalizedEmail,
+        body.phone,
+        resumeText,
+        JSON.stringify(resumeParsed),
+      ]);
 
-    const { url: resumeUrl, key: resumeKey } =
-      await this.uploadsService.uploadResume(file, userId);
+      const userId = result.rows[0].id;
 
-    await this.pool.query(
-      `UPDATE users SET resume_url = $1, resume_key = $2, updated_at = now() WHERE id = $3`,
-      [resumeUrl, resumeKey, userId],
-    );
+      // Note: uploadResume currently uses its own pool reference,
+      // so its internal DB updates will be outside this transaction.
+      // However, we still COMMIT our part if it succeeds.
+      const { url: resumeUrl, key: resumeKey } =
+        await this.uploadsService.uploadResume(file, userId);
 
-    return this.mapUser(result.rows[0]);
+      const updated = await client.query<UserRow>(
+        `UPDATE users SET resume_url = $1, resume_key = $2, updated_at = now() WHERE id = $3 RETURNING *`,
+        [resumeUrl, resumeKey, userId],
+      );
+
+      await client.query('COMMIT');
+      return this.mapUser(updated.rows[0]);
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
   }
 
   async replaceResume(email: string, file: Express.Multer.File) {
@@ -233,17 +241,13 @@ export class UsersService {
     // parser does not produce (current_role, location, industry, summary,
     // experience_years).
     const mergedParsed = {
-      ...existingParsed,  // keep existing enrichment fields
-      ...resumeParsed,    // overwrite with freshly parsed fields
+      ...existingParsed, // keep existing enrichment fields
+      ...resumeParsed, // overwrite with freshly parsed fields
       // Preserve manual enrichment fields only if the parser didn't produce them
-      current_role:
-        resumeParsed.current_role ?? existingParsed.current_role,
-      location:
-        resumeParsed.location ?? existingParsed.location,
-      industry:
-        resumeParsed.industry ?? existingParsed.industry,
-      summary:
-        resumeParsed.summary ?? existingParsed.summary,
+      current_role: resumeParsed.current_role ?? existingParsed.current_role,
+      location: resumeParsed.location ?? existingParsed.location,
+      industry: resumeParsed.industry ?? existingParsed.industry,
+      summary: resumeParsed.summary ?? existingParsed.summary,
       experience_years:
         resumeParsed.experience_years ?? existingParsed.experience_years,
     };
@@ -301,15 +305,36 @@ export class UsersService {
     try {
       await this.schemaReady;
 
-      const googleResponse = await fetch(
-        'https://www.googleapis.com/oauth2/v3/userinfo',
-        {
-          headers: { Authorization: `Bearer ${token}` },
-        },
-      );
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 10000); // 10s timeout
+
+      let googleResponse: globalThis.Response;
+      try {
+        googleResponse = await fetch(
+          'https://www.googleapis.com/oauth2/v3/userinfo',
+          {
+            headers: { Authorization: `Bearer ${token}` },
+            signal: controller.signal,
+          },
+        );
+      } catch (err: any) {
+        if (err.name === 'AbortError') {
+          throw new ServiceUnavailableException(
+            'Google userinfo request timed out',
+          );
+        }
+        throw new BadGatewayException(
+          'Failed to connect to Google: ' + err.message,
+        );
+      } finally {
+        clearTimeout(timeout);
+      }
 
       if (!googleResponse.ok) {
-        throw new UnauthorizedException('Invalid Google token');
+        const errorText = await googleResponse.text().catch(() => 'Unknown');
+        throw new BadGatewayException(
+          `Google userinfo responded with ${googleResponse.status}: ${errorText}`,
+        );
       }
 
       const googleUser = await googleResponse.json();
@@ -331,11 +356,11 @@ export class UsersService {
             ) VALUES ($1, $2, $3, $4, TRUE) RETURNING *;
           `;
 
-          const result = await this.pool.query<UserRow>(insertQuery, [
+          await this.pool.query<UserRow>(insertQuery, [
             firstName,
             lastName,
             normalizedEmail,
-            '0000000000',
+            null,
           ]);
 
           userWithResume = await this.getCurrentUser(normalizedEmail);
@@ -353,7 +378,10 @@ export class UsersService {
         accessToken,
         user: userWithResume,
       };
-    } catch (error) {
+    } catch (error: any) {
+      if (error.name === 'AbortError') {
+        throw new UnauthorizedException('Google userinfo request timed out');
+      }
       console.error('Google Login failed:', error);
       throw new UnauthorizedException('Google authentication failed');
     }
@@ -499,17 +527,19 @@ export class UsersService {
     return this.mapUser(res.rows[0]);
   }
 
-  async downloadResume(candidateId: string, res: Response) {
+  async downloadResume(candidateId: string, res: ExpressResponse) {
     await this.schemaReady;
     const user = await this.findById(candidateId);
 
-    if (!user || !user.resumeKey) {
+    const resumeKey =
+      user?.resumeKey ??
+      (user?.resumeUrl ? this.extractResumeKey(user.resumeUrl) : null);
+
+    if (!user || !resumeKey) {
       throw new NotFoundException('Resume not found for this candidate');
     }
 
-    const signedUrl = await this.uploadsService.getSignedResumeUrl(
-      user.resumeKey,
-    );
+    const signedUrl = await this.uploadsService.getSignedResumeUrl(resumeKey);
 
     return res.redirect(signedUrl);
   }
@@ -551,7 +581,7 @@ export class UsersService {
         middle_name TEXT,
         last_name TEXT NOT NULL,
         email TEXT NOT NULL UNIQUE,
-        phone TEXT NOT NULL,
+        phone TEXT,
         resume_url TEXT,
         resume_key TEXT,
         resume_text TEXT,
@@ -561,6 +591,17 @@ export class UsersService {
         updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
       );
     `);
+
+    // Ensure existing tables allow NULL for phone
+    await this.pool
+      .query(
+        `
+      ALTER TABLE users ALTER COLUMN phone DROP NOT NULL;
+    `,
+      )
+      .catch(() => {
+        /* Ignore errors if column doesn't exist yet */
+      });
   }
 
   private mapUser(row: UserRow) {

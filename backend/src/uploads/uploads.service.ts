@@ -9,6 +9,7 @@ import {
   S3Client,
   PutObjectCommand,
   GetObjectCommand,
+  DeleteObjectCommand,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { randomUUID } from 'crypto';
@@ -27,8 +28,13 @@ export class UploadsService {
     private readonly pool: Pool,
     private readonly resumeParserService: ResumeParserService,
   ) {
-    const required = ['R2_ENDPOINT', 'R2_ACCESS_KEY', 'R2_SECRET_KEY', 'R2_BUCKET'];
-    const missing = required.filter(k => !process.env[k]);
+    const required = [
+      'R2_ENDPOINT',
+      'R2_ACCESS_KEY',
+      'R2_SECRET_KEY',
+      'R2_BUCKET',
+    ];
+    const missing = required.filter((k) => !process.env[k]);
     if (missing.length) {
       throw new Error(`Missing required R2 env vars: ${missing.join(', ')}`);
     }
@@ -46,6 +52,13 @@ export class UploadsService {
     });
   }
 
+  private sanitizeFilename(filename: string): string {
+    return filename
+      .replace(/[^a-zA-Z0-9._-]/g, '_')
+      .replace(/^\.+/, '')
+      .slice(0, 255);
+  }
+
   async uploadResume(file: Express.Multer.File, userId: string) {
     if (!userId) {
       throw new UnauthorizedException('Missing user identity');
@@ -56,8 +69,10 @@ export class UploadsService {
     if (!file.originalname || !file.buffer) {
       throw new BadRequestException('Invalid resume file');
     }
-    const fileKey = `resumes/${randomUUID()}-${file.originalname}`;
+    const sanitizedName = this.sanitizeFilename(file.originalname);
+    const fileKey = `resumes/${randomUUID()}-${sanitizedName}`;
 
+    let uploaded = false;
     try {
       console.log('R2 upload starting, endpoint:', this.r2Endpoint);
       console.log('R2 bucket:', this.r2Bucket);
@@ -71,6 +86,7 @@ export class UploadsService {
           ContentType: file.mimetype,
         }),
       );
+      uploaded = true;
       console.log('R2 upload success:', fileKey);
     } catch (err) {
       const error = err as Error;
@@ -107,6 +123,10 @@ export class UploadsService {
       const parsed = resumeParsed as any;
       const resumeId = randomUUID();
 
+      const extension = file.originalname.includes('.')
+        ? (file.originalname.split('.').pop() || 'pdf').toLowerCase()
+        : 'pdf';
+
       await this.pool.query(
         `INSERT INTO resumes (
           id, tenant_id, uploaded_by, candidate_name, candidate_email,
@@ -126,7 +146,7 @@ export class UploadsService {
           parsed.phone || null,
           fileKey,
           file.originalname,
-          file.originalname.split('.').pop(),
+          extension,
           parsed.skills && parsed.skills.length > 0 ? parsed.skills : [],
           parsed.experience_years || null,
           parsed.education || null,
@@ -141,6 +161,19 @@ export class UploadsService {
       };
     } catch (err) {
       const error = err as Error;
+      if (uploaded) {
+        console.warn('Attempting rollback for orphaned object:', fileKey);
+        await this.r2Client
+          .send(
+            new DeleteObjectCommand({
+              Bucket: this.r2Bucket,
+              Key: fileKey,
+            }),
+          )
+          .catch((delErr) =>
+            console.error('Rollback deletion FAILED:', delErr.message),
+          );
+      }
       console.error('Post-upload step FAILED:', error.message, error.stack);
       throw new InternalServerErrorException(
         'Post upload processing failed: ' + error.message,

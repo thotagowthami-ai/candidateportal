@@ -1,4 +1,12 @@
-import { Body, Controller, Get, Post, Req, Res, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Post,
+  Req,
+  Res,
+  UseGuards,
+} from '@nestjs/common';
 import type { Response } from 'express';
 import { AuthGuard } from '@nestjs/passport';
 import { AuthService } from './auth.service';
@@ -72,7 +80,10 @@ export class AuthController {
       const googleUser = req.user;
       const result = await this.authService.handleGoogleUser(googleUser);
       // Generate a one-time exchange code instead of passing the token directly
-      const code = await this.authService.generateExchangeCode(result.accessToken, result.user);
+      const code = await this.authService.generateExchangeCode(
+        result.accessToken,
+        result.user,
+      );
       const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
 
       const redirectUrl = new URL(`${frontendUrl}/resume`);
@@ -88,6 +99,10 @@ export class AuthController {
 
   @Get('test')
   test() {
-    return { status: 'ok', message: 'Auth controller is live', timestamp: new Date().toISOString() };
+    return {
+      status: 'ok',
+      message: 'Auth controller is live',
+      timestamp: new Date().toISOString(),
+    };
   }
 }

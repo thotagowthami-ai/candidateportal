@@ -6,6 +6,7 @@ import {
   Req,
   UseGuards,
   Query,
+  BadRequestException,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -45,6 +46,9 @@ export class MatchController {
     @Query('jobDescriptionId') jobDescriptionId: string,
     @Body() body: MatchJdDto,
   ) {
+    if (!jobDescriptionId?.trim()) {
+      throw new BadRequestException('jobDescriptionId query param is required');
+    }
     return this.matchService.saveMatchesForJob(jobDescriptionId, body);
   }
 }
