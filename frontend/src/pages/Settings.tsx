@@ -204,6 +204,7 @@ export default function Settings() {
         summary: profile.summary,
       });
       setMessage("success", "Profile details updated securely in database.");
+      loadProfileData();
     } catch (error) {
       console.error("Failed to save profile", error);
       setMessage("error", "Failed to save profile. Please try again.");
@@ -276,6 +277,7 @@ export default function Settings() {
       setOtpVerified(false);
       setOtp("");
       setMessage("success", "Mobile number updated securely in database.");
+      loadProfileData();
     } catch (error) {
       console.error("Update Error:", error);
       setMessage("error", "Failed to save new mobile number.");
@@ -302,6 +304,7 @@ export default function Settings() {
         skills: updatedSkills,
       });
       setMessage("success", "Skill added and saved.");
+      loadProfileData();
     } catch (error) {
       console.error("Failed to save skill", error);
       setMessage("error", "Skill added locally, but failed to save to server.");
@@ -318,6 +321,7 @@ export default function Settings() {
         skills: updatedSkills,
       });
       setMessage("success", "Skill removed.");
+      loadProfileData();
     } catch (error) {
       console.error("Failed to remove skill", error);
       setMessage("error", "Failed to sync deletion with server.");
@@ -341,6 +345,7 @@ export default function Settings() {
         education: updatedEdu,
       });
       setMessage("success", "Education added and saved.");
+      loadProfileData();
     } catch (error) {
       console.error("Failed to save education", error);
       setMessage("error", "Failed to sync education with server.");
@@ -357,6 +362,7 @@ export default function Settings() {
         education: updatedEdu,
       });
       setMessage("success", "Education entry removed.");
+      loadProfileData();
     } catch (error) {
       console.error("Failed to remove education", error);
       setMessage("error", "Failed to sync deletion with server.");
@@ -421,13 +427,17 @@ export default function Settings() {
         day: "numeric",
         month: "short",
         year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
       }).formatToParts(date);
       
       const day = parts.find(p => p.type === "day")?.value;
       const month = parts.find(p => p.type === "month")?.value;
       const year = parts.find(p => p.type === "year")?.value;
+      const hour = parts.find(p => p.type === "hour")?.value;
+      const minute = parts.find(p => p.type === "minute")?.value;
       
-      return `${day} ${month}, ${year}`;
+      return `${day} ${month}, ${year} ${hour}:${minute}`;
     } catch {
       return "N/A";
     }
@@ -542,21 +552,44 @@ export default function Settings() {
               </nav>
             </div>
 
-            <div className="rounded-2xl border border-outline-variant bg-surface-container-lowest p-5">
-              <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-on-surface_variant/60">
-                Profile Completion
-              </p>
-              <div className="mt-4 space-y-3">
-                <div className="flex items-center justify-between text-sm font-bold">
-                  <span className="text-on-surface">Completeness</span>
-                  <span className="text-primary font-mono">78%</span>
+            <div className="rounded-2xl border border-outline-variant bg-surface-container-lowest p-5 relative overflow-hidden group hover:border-primary/20 transition-all duration-300">
+              {/* Subtle background glow */}
+              <div className="absolute -right-10 -bottom-10 w-24 h-24 bg-primary/5 rounded-full blur-xl group-hover:bg-primary/8 transition-all duration-500" />
+              
+              <div className="flex items-center gap-2 relative z-10">
+                <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                  </svg>
                 </div>
-                <div className="h-1.5 rounded-full bg-surface-container-highest/50 overflow-hidden">
-                  <div className="h-full w-[78%] bg-primary shadow-[0_0_8px_rgba(0,108,73,0.6)]" />
-                </div>
-                <p className="text-xs text-on-surface_variant font-light">
-                  Add more details to increase visibility.
+                <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-on-surface_variant/60">
+                  Profile Completion
                 </p>
+              </div>
+              
+              <div className="mt-4 space-y-3 relative z-10">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-on-surface font-semibold">Completeness</span>
+                  <div className="flex items-center gap-1">
+                    <span className="text-primary font-space font-bold">78%</span>
+                  </div>
+                </div>
+                
+                <div className="h-2 rounded-full bg-surface-container-highest/50 overflow-hidden p-[1px] border border-outline-variant/30">
+                  <div 
+                    className="h-full rounded-full bg-gradient-to-r from-primary/80 to-primary shadow-[0_0_12px_rgba(0,108,73,0.4)] transition-all duration-1000 ease-out" 
+                    style={{ width: '78%' }}
+                  />
+                </div>
+                
+                <div className="flex items-start gap-1.5 mt-2">
+                  <svg className="w-3.5 h-3.5 text-primary mt-0.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  <p className="text-[11px] text-on-surface_variant/80 font-light leading-relaxed">
+                    Add more details to increase visibility and unlock matchmaking options.
+                  </p>
+                </div>
               </div>
             </div>
           </aside>
