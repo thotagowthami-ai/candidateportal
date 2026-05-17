@@ -80,6 +80,8 @@ export default function Settings() {
   const [skillDraft, setSkillDraft] = useState("");
   const [visibility, setVisibility] = useState(true);
   const [searchable, setSearchable] = useState(true);
+  const [savingVisibility, setSavingVisibility] = useState(false);
+  const [savingSearchable, setSavingSearchable] = useState(false);
   const [metadata, setMetadata] = useState({
     updatedAt: "",
     lastLogin: "",
@@ -147,6 +149,9 @@ export default function Settings() {
       if (parsed.education && Array.isArray(parsed.education)) {
         setEducation(parsed.education);
       }
+
+      setVisibility(parsed.visibility !== undefined ? parsed.visibility : true);
+      setSearchable(parsed.searchable !== undefined ? parsed.searchable : true);
     } catch (error) {
       console.error("Failed to load real profile data", error);
     }
@@ -216,14 +221,54 @@ export default function Settings() {
     setMessage("info", "Changes discarded. Original data restored.");
   };
 
+  const handleVisibilityToggle = async () => {
+    const nextVal = !visibility;
+    try {
+      setSavingVisibility(true);
+      await api.post("/users/update-profile", { visibility: nextVal });
+      setVisibility(nextVal);
+      setMessage("success", `Profile visibility set to ${nextVal ? "Public" : "Private"}.`);
+    } catch (error) {
+      console.error("Failed to update visibility", error);
+      setMessage("error", "Failed to update profile visibility.");
+    } finally {
+      setSavingVisibility(false);
+    }
+  };
+
+  const handleSearchableToggle = async () => {
+    const nextVal = !searchable;
+    try {
+      setSavingSearchable(true);
+      await api.post("/users/update-profile", { searchable: nextVal });
+      setSearchable(nextVal);
+      setMessage("success", `Matchmaking ${nextVal ? "Enabled" : "Disabled"}.`);
+    } catch (error) {
+      console.error("Failed to update matchmaking setting", error);
+      setMessage("error", "Failed to update matchmaking settings.");
+    } finally {
+      setSavingSearchable(false);
+    }
+  };
+
   // --- CONTACT LOGIC ---
-  const handleEmailSave = () => {
+  const handleEmailSave = async () => {
     if (!emailDraft.includes("@")) {
       setMessage("error", "Enter a valid email address.");
       return;
     }
-    setContact((prev) => ({ ...prev, email: emailDraft }));
-    setMessage("success", "Email updated successfully.");
+    try {
+      await api.post("/users/update-profile", {
+        ...profile,
+        email: emailDraft,
+      });
+      setContact((prev) => ({ ...prev, email: emailDraft }));
+      setMessage("success", "Email updated successfully.");
+      loadProfileData();
+    } catch (error) {
+      console.error("Failed to update email", error);
+      setMessage("error", "Failed to update email.");
+    }
   };
 
   const handleSendOtp = async () => {
@@ -973,14 +1018,17 @@ export default function Settings() {
                     </div>
                     <button
                       type="button"
-                      onClick={() => setVisibility((prev) => !prev)}
+                      onClick={handleVisibilityToggle}
+                      disabled={savingVisibility}
                       className={`rounded px-4 py-1.5 text-[10px] font-bold uppercase tracking-widest transition-all ${
-                        visibility
-                          ? "bg-primary/20 text-primary border border-primary/30 shadow-[0_0_15px_rgba(0,108,73,0.1)]"
-                          : "bg-surface-container-highest border border-outline-variant text-on-surface_variant opacity-70"
+                        savingVisibility
+                          ? "bg-surface-container-highest border border-outline-variant text-on-surface_variant opacity-50 cursor-not-allowed"
+                          : visibility
+                          ? "bg-primary/20 text-primary border border-primary/30 shadow-[0_0_15px_rgba(0,108,73,0.1)] hover:bg-primary/30"
+                          : "bg-surface-container-highest border border-outline-variant text-on-surface_variant opacity-70 hover:opacity-100"
                       }`}
                     >
-                      {visibility ? "Public" : "Private"}
+                      {savingVisibility ? "Saving..." : visibility ? "Public" : "Private"}
                     </button>
                   </div>
                   <div className="flex items-center justify-between rounded-xl border border-outline-variant bg-surface-container-low px-5 py-4 transition-all hover:bg-surface-container-high">
@@ -992,14 +1040,17 @@ export default function Settings() {
                     </div>
                     <button
                       type="button"
-                      onClick={() => setSearchable((prev) => !prev)}
+                      onClick={handleSearchableToggle}
+                      disabled={savingSearchable}
                       className={`rounded px-4 py-1.5 text-[10px] font-bold uppercase tracking-widest transition-all ${
-                        searchable
-                          ? "bg-primary/20 text-primary border border-primary/30 shadow-[0_0_15px_rgba(0,108,73,0.1)]"
-                          : "bg-surface-container-highest border border-outline-variant text-on-surface_variant opacity-70"
+                        savingSearchable
+                          ? "bg-surface-container-highest border border-outline-variant text-on-surface_variant opacity-50 cursor-not-allowed"
+                          : searchable
+                          ? "bg-primary/20 text-primary border border-primary/30 shadow-[0_0_15px_rgba(0,108,73,0.1)] hover:bg-primary/30"
+                          : "bg-surface-container-highest border border-outline-variant text-on-surface_variant opacity-70 hover:opacity-100"
                       }`}
                     >
-                      {searchable ? "Enabled" : "Disabled"}
+                      {savingSearchable ? "Saving..." : searchable ? "Enabled" : "Disabled"}
                     </button>
                   </div>
                 </div>

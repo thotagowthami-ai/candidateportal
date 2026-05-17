@@ -7,7 +7,7 @@ export type FetchWithRetryOptions = RequestInit & {
 
 export async function fetchWithRetry(input: RequestInfo, options: FetchWithRetryOptions = {}): Promise<Response> {
   const { retries = 3, timeoutMs = 8000, backoffMs = 500, allowRetry, ...fetchOptions } = options;
-  const method = (fetchOptions.method ?? 'GET').toUpperCase();
+  const method = (fetchOptions.method ?? (input instanceof Request ? input.method : 'GET')).toUpperCase();
   const canRetry = allowRetry ?? ['GET', 'HEAD', 'PUT', 'DELETE', 'OPTIONS'].includes(method);
   let attempt = 0;
   while (true) {

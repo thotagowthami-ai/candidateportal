@@ -10,9 +10,12 @@ export default function UploadResume() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  const stored = JSON.parse(
-    sessionStorage.getItem("registerData") || "{}"
-  );
+    let stored: Record<string, string> = {};
+  try {
+    stored = JSON.parse(sessionStorage.getItem("registerData") || "{}");
+  } catch {
+    stored = {};
+  }
 
   const handleSelectedFile = useCallback((selectedFile: File) => {
     if (
@@ -70,7 +73,7 @@ export default function UploadResume() {
       formData.append("email", stored.email);
       formData.append("phone", stored.phone);
 
-      formData.append("resume", file);
+      formData.append("file", file);
 
       await api.post("/users/create", formData);
 

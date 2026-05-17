@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import mammoth from 'mammoth';
 import {
   ResumeEducationEntry,
@@ -8,6 +8,8 @@ import {
 
 @Injectable()
 export class ResumeParserService {
+  private readonly logger = new Logger(ResumeParserService.name);
+
   private pdfParseFn: ((data: Buffer) => Promise<{ text?: string }>) | null =
     null;
 
@@ -102,7 +104,9 @@ export class ResumeParserService {
   }> {
     try {
       const resumeText = await this.extractText(file);
-      console.log('PARSED TEXT LENGTH', resumeText?.length);
+      if (process.env.DEBUG_RESUME_PARSER === 'true') {
+        this.logger.debug(`Parsed text length: ${resumeText?.length ?? 0}`);
+      }
 
       return {
         resumeText,
@@ -121,7 +125,7 @@ export class ResumeParserService {
         },
       };
     } catch (e) {
-      console.error('RESUME PARSE ERROR', e);
+      this.logger.warn('Resume parsing failed');
       if (e instanceof BadRequestException) {
         throw e;
       }
@@ -133,9 +137,9 @@ export class ResumeParserService {
 
   private async extractText(file: Express.Multer.File): Promise<string> {
     const lowerName = (file.originalname || '').toLowerCase();
-    console.debug(
-      `ResumeParser: extracting text, mime="${file.mimetype}", size=${file.size}`,
-    );
+    if (process.env.DEBUG_RESUME_PARSER === 'true') {
+      this.logger.debug('ResumeParser: extracting text');
+    }
 
     if (file.mimetype === 'application/pdf' || lowerName.endsWith('.pdf')) {
       try {
@@ -149,11 +153,14 @@ export class ResumeParserService {
         }
         return normalized;
       } catch (err) {
+        const extension = file.originalname?.includes('.')
+          ? (file.originalname.split('.').pop() || 'pdf').toLowerCase()
+          : 'pdf';
         const details = {
-          fileName: file.originalname,
+          fileName: `[redacted].${extension}`,
           mimeType: file.mimetype,
           sizeBytes: file.size,
-          error: err?.message ?? 'parse error',
+          error: 'parse error',
         };
         if (process.env.OCR_ENABLED === 'true') {
           try {

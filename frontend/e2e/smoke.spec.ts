@@ -12,5 +12,5 @@ test("login page is reachable", async ({ page }) => {
     waitUntil: "domcontentloaded",
   });
   expect(response).not.toBeNull();
-  expect(response!.status()).toBeLessThan(500);
+  expect(response!.status()).toBeLessThan(400);
 });

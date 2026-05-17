@@ -54,10 +54,11 @@ export class UsersController {
   @Get(':candidateId/resume')
   @UseGuards(AuthGuard('jwt'))
   async downloadResume(
+    @Req() req: { user: { sub?: string; email: string } },
     @Param('candidateId') candidateId: string,
     @Res() res: Response,
   ) {
-    return this.usersService.downloadResume(candidateId, res);
+    return this.usersService.downloadResume(candidateId, res, req.user);
   }
 
   @Post('update-profile')

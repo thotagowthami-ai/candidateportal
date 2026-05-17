@@ -23,8 +23,8 @@ export class InitiateRegistrationDto {
   email: string;
 
   @IsString()
-  @Matches(/^[0-9]{10}$/, {
-    message: 'Phone number must be 10 digits',
+  @Matches(/^\+[1-9]\d{7,14}$/, {
+    message: 'Phone number must be in E.164 format (e.g. +14155552671)',
   })
   phone: string;
 }

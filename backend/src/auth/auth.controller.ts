@@ -24,7 +24,7 @@ export class AuthController {
   // ✅ Send OTP manually (optional)
   @Post('send-otp')
   sendOtp(@Body('email') email: string) {
-    console.log('Sending OTP to:', email);
+    console.log('Sending OTP request');
 
     return this.authService.sendOtp(email);
   }
@@ -91,7 +91,7 @@ export class AuthController {
 
       return res.redirect(redirectUrl.toString());
     } catch (error) {
-      console.error('Google callback error:', error);
+      console.error('Google callback error');
       const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
       return res.redirect(`${frontendUrl}/?error=google_auth_failed`);
     }

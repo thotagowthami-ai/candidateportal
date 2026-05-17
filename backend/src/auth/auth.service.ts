@@ -21,8 +21,12 @@ export class AuthService {
     this.resend = new Resend(process.env.RESEND_API_KEY);
   }
 
+  private normalizeEmail(email: string): string {
+    return email?.trim()?.toLowerCase?.() || '';
+  }
+
   async initiate(data: any) {
-    const email = data?.email?.trim()?.toLowerCase?.() || '';
+    const email = this.normalizeEmail(data?.email);
     if (!email) throw new BadRequestException('Email is required.');
 
     const existingUser = await this.usersService.findByEmail(email);
@@ -33,19 +37,20 @@ export class AuthService {
   }
 
   async sendOtp(email: string, data?: any) {
-    if (!email) throw new BadRequestException('Email is required.');
+    const normalizedEmail = this.normalizeEmail(email);
+    if (!normalizedEmail) throw new BadRequestException('Email is required.');
 
     const otp = randomInt(100000, 1000000).toString();
 
     // Store in TokenStore with 5 minute TTL
-    await this.tokenStore.set(`otp:${email}`, { otp, data }, 5 * 60);
+    await this.tokenStore.set(`otp:${normalizedEmail}`, { otp, data }, 5 * 60);
 
-    console.log('Sending OTP to', email.replace(/(.{2}).*(@.*)/, '$1***$2'));
+    console.log('Sending OTP to', normalizedEmail.replace(/(.{2}).*(@.*)/, '$1***$2'));
 
     try {
       await this.resend.emails.send({
         from: process.env.EMAIL_FROM!,
-        to: email,
+        to: normalizedEmail,
         subject: 'Register Portal Email Verification',
         html: `
           <h2>Email Verification</h2>
@@ -88,23 +93,25 @@ export class AuthService {
   }
 
   async resendOtp(email: string) {
-    const record = await this.tokenStore.get(`otp:${email}`);
-    return this.sendOtp(email, record?.data);
+    const normalizedEmail = this.normalizeEmail(email);
+    const record = await this.tokenStore.get(`otp:${normalizedEmail}`);
+    return this.sendOtp(normalizedEmail, record?.data);
   }
 
   async verifyOtp(email: string, otp: string) {
-    const record = await this.tokenStore.get(`otp:${email}`);
+    const normalizedEmail = this.normalizeEmail(email);
+    const record = await this.tokenStore.get(`otp:${normalizedEmail}`);
 
     if (!record) throw new BadRequestException('OTP not found or expired');
     if (record.otp !== otp) throw new BadRequestException('Invalid OTP');
 
-    await this.tokenStore.delete(`otp:${email}`);
+    await this.tokenStore.delete(`otp:${normalizedEmail}`);
 
     // Check if user already exists (login flow)
-    const existingUser = await this.usersService.findByEmail(email);
+    const existingUser = await this.usersService.findByEmail(normalizedEmail);
     if (existingUser) {
       // Existing user — issue token directly
-      const { accessToken } = await this.usersService.login(email);
+      const { accessToken } = await this.usersService.login(normalizedEmail);
       return {
         message: 'OTP verified successfully',
         accessToken,
@@ -121,7 +128,7 @@ export class AuthService {
   }
 
   async login(email: string) {
-    return this.usersService.login(email);
+    return this.usersService.login(this.normalizeEmail(email));
   }
 
   async requestPasswordReset(email: string) {

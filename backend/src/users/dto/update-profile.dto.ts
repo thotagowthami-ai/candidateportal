@@ -36,4 +36,14 @@ export class UpdateProfileDto {
   @IsOptional()
   @IsArray()
   education?: any[];
+
+  @IsOptional()
+  @IsString()
+  email?: string;
+
+  @IsOptional()
+  visibility?: boolean;
+
+  @IsOptional()
+  searchable?: boolean;
 }

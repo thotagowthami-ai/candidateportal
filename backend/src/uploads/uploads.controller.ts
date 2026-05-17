@@ -25,6 +25,19 @@ export class UploadsController {
       limits: {
         fileSize: 10 * 1024 * 1024, // 10 MB limit
       },
+      fileFilter: (_req, file, cb) => {
+        const allowedMimeTypes = new Set([
+          'application/pdf',
+          'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        ]);
+        if (!allowedMimeTypes.has(file.mimetype)) {
+          return cb(
+            new BadRequestException('Only PDF and DOCX files are allowed'),
+            false,
+          );
+        }
+        cb(null, true);
+      },
     }),
   )
   uploadResume(

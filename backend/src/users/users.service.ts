@@ -6,6 +6,9 @@ import {
   UnauthorizedException,
   BadGatewayException,
   ServiceUnavailableException,
+  Logger,
+  ForbiddenException,
+  HttpException,
 } from '@nestjs/common';
 import { createHash, randomInt } from 'crypto';
 import { Express, Response as ExpressResponse } from 'express';
@@ -40,6 +43,7 @@ type UserRow = {
 
 @Injectable()
 export class UsersService {
+  private readonly logger = new Logger(UsersService.name);
   private readonly schemaReady: Promise<void>;
 
   constructor(
@@ -58,24 +62,33 @@ export class UsersService {
     return createHash('sha256').update(otp).digest('hex');
   }
 
+  private normalizePhone(phone: string): string {
+    return phone?.replace(/[^\d+]/g, '') || '';
+  }
+
   // --- NEW: TWILIO OTP LOGIC ---
   async sendOtp(phone: string) {
+    const normalizedPhone = this.normalizePhone(phone);
+    if (!normalizedPhone) {
+      throw new BadRequestException('Phone number is required.');
+    }
+
     // 1. Generate a random 4-digit code
     const otpCode = randomInt(1000, 10000).toString();
 
     // 2. Store the hashed OTP in PostgreSQL (expires in 10 minutes)
     const hashedOtp = this.hashOtp(otpCode);
     await this.tokenStore.set(
-      `user_otp:${phone}`,
+      `user_otp:${normalizedPhone}`,
       { hash: hashedOtp, attempts: 0 },
       10 * 60,
     );
 
-    console.log(`Generated OTP for ${phone}`);
+    this.logger.log('Generated OTP');
 
     // 3. Send the actual text message via Twilio
     const message = `Your RecruitApp verification code is: ${otpCode}. Valid for 10 minutes.`;
-    const result = await this.smsService.sendCandidateSMS(phone, message);
+    const result = await this.smsService.sendCandidateSMS(normalizedPhone, message);
 
     if (!result.success) {
       throw new BadRequestException(
@@ -87,7 +100,11 @@ export class UsersService {
   }
 
   async verifyOtp(phone: string, otp: string) {
-    const key = `user_otp:${phone}`;
+    const normalizedPhone = this.normalizePhone(phone);
+    if (!normalizedPhone) {
+      throw new BadRequestException('Phone number is required.');
+    }
+    const key = `user_otp:${normalizedPhone}`;
     // 1. Check if the OTP exists for this phone number
     const record = await this.tokenStore.get(key);
 
@@ -149,6 +166,7 @@ export class UsersService {
       await this.resumeParserService.parseFromFile(file);
 
     const client = await this.pool.connect();
+    let userId: string;
     try {
       await client.query('BEGIN');
 
@@ -187,27 +205,26 @@ export class UsersService {
         JSON.stringify(resumeParsed),
       ]);
 
-      const userId = result.rows[0].id;
-
-      // Note: uploadResume currently uses its own pool reference,
-      // so its internal DB updates will be outside this transaction.
-      // However, we still COMMIT our part if it succeeds.
-      const { url: resumeUrl, key: resumeKey } =
-        await this.uploadsService.uploadResume(file, userId);
-
-      const updated = await client.query<UserRow>(
-        `UPDATE users SET resume_url = $1, resume_key = $2, updated_at = now() WHERE id = $3 RETURNING *`,
-        [resumeUrl, resumeKey, userId],
-      );
+      userId = result.rows[0].id;
 
       await client.query('COMMIT');
-      return this.mapUser(updated.rows[0]);
     } catch (err) {
       await client.query('ROLLBACK');
       throw err;
     } finally {
       client.release();
     }
+
+    // Perform slow R2 network upload and subsequent update outside of SQL transaction
+    const { url: resumeUrl, key: resumeKey } =
+      await this.uploadsService.uploadResume(file, userId);
+
+    const updated = await this.pool.query<UserRow>(
+      `UPDATE users SET resume_url = $1, resume_key = $2, updated_at = now() WHERE id = $3 RETURNING *`,
+      [resumeUrl, resumeKey, userId],
+    );
+
+    return this.mapUser(updated.rows[0]);
   }
 
   async replaceResume(email: string, file: Express.Multer.File) {
@@ -389,8 +406,23 @@ export class UsersService {
         user: userWithResume,
       };
     } catch (error: any) {
+      if (error instanceof HttpException) {
+        throw error;
+      }
       if (error.name === 'AbortError') {
         throw new UnauthorizedException('Google userinfo request timed out');
+      }
+      const isNetworkError =
+        error.name === 'FetchError' ||
+        error.code === 'ENOTFOUND' ||
+        error.code === 'ECONNRESET' ||
+        error.message?.includes('fetch failed') ||
+        error.message?.includes('getaddrinfo');
+
+      if (isNetworkError) {
+        throw new ServiceUnavailableException(
+          'Google authentication service is currently unavailable: ' + error.message,
+        );
       }
       console.error('Google Login failed:', error);
       throw new UnauthorizedException('Google authentication failed');
@@ -441,6 +473,8 @@ export class UsersService {
       // --- THIS LINE ENSURES SKILLS ARE PERMANENTLY SAVED ---
       skills: updateData.skills || existingParsed.skills,
       education: updateData.education || existingParsed.education,
+      visibility: updateData.visibility !== undefined ? updateData.visibility : existingParsed.visibility,
+      searchable: updateData.searchable !== undefined ? updateData.searchable : existingParsed.searchable,
     };
 
     await this.pool.query(
@@ -452,6 +486,7 @@ export class UsersService {
   }
 
   async login(email: string) {
+    await this.schemaReady;
     const normalizedEmail = email.trim().toLowerCase();
 
     // Update last_login timestamp
@@ -544,15 +579,38 @@ export class UsersService {
     return this.mapUser(res.rows[0]);
   }
 
-  async downloadResume(candidateId: string, res: ExpressResponse) {
+  async downloadResume(
+    candidateId: string,
+    res: ExpressResponse,
+    requestUser: { sub?: string; email: string },
+  ) {
     await this.schemaReady;
-    const user = await this.findById(candidateId);
+    const candidateUser = await this.findById(candidateId);
+
+    if (!candidateUser) {
+      throw new NotFoundException('Candidate not found');
+    }
+
+    const isOwner =
+      requestUser.sub === candidateId ||
+      requestUser.email === candidateUser.email;
+    const isAdmin =
+      requestUser.email?.endsWith('@recruitapp.com') ||
+      requestUser.email?.startsWith('admin@');
+
+    if (!isOwner && !isAdmin) {
+      throw new ForbiddenException(
+        'Forbidden: You do not have permission to download this resume',
+      );
+    }
 
     const resumeKey =
-      user?.resumeKey ??
-      (user?.resumeUrl ? this.extractResumeKey(user.resumeUrl) : null);
+      candidateUser.resumeKey ??
+      (candidateUser.resumeUrl
+        ? this.extractResumeKey(candidateUser.resumeUrl)
+        : null);
 
-    if (!user || !resumeKey) {
+    if (!resumeKey) {
       throw new NotFoundException('Resume not found for this candidate');
     }
 

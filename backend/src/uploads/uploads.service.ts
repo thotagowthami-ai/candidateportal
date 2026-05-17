@@ -91,9 +91,7 @@ export class UploadsService {
     } catch (err) {
       const error = err as Error;
       console.error('R2 upload FAILED:', error.message, error.stack);
-      throw new InternalServerErrorException(
-        'File upload to R2 failed: ' + error.message,
-      );
+      throw new InternalServerErrorException('File upload failed');
     }
 
     try {
@@ -101,58 +99,75 @@ export class UploadsService {
       const { resumeParsed } =
         await this.resumeParserService.parseFromFile(file);
 
-      // 3. Store parsed data + file key in users table
-      await this.pool.query(
-        `UPDATE users SET resume_key = $1, resume_parsed = $2, updated_at = now() WHERE id = $3`,
-        [fileKey, JSON.stringify(resumeParsed), userId],
-      );
+      // 3. Store parsed data + file key in users table via a single database transaction
+      const db = await this.pool.connect();
+      try {
+        await db.query('BEGIN');
 
-      // 4. Get tenant_id from env
-      const tenantId = process.env.RECRUITING_TENANT_ID;
+        const updateResult = await db.query(
+          `UPDATE users SET resume_key = $1, resume_parsed = $2, updated_at = now() WHERE id = $3`,
+          [fileKey, JSON.stringify(resumeParsed), userId],
+        );
 
-      if (!tenantId) {
-        console.warn('RECRUITING_TENANT_ID not set, skipping resumes insert');
-        return {
-          key: fileKey,
-          url: `${this.r2Endpoint}/${this.r2Bucket}/${fileKey}`,
-          resumeParsed,
-        };
+        if (updateResult.rowCount !== 1) {
+          throw new UnauthorizedException('User not found');
+        }
+
+        // 4. Get tenant_id from env
+        const tenantId = process.env.RECRUITING_TENANT_ID;
+
+        if (!tenantId) {
+          console.warn('RECRUITING_TENANT_ID not set, skipping resumes insert');
+          await db.query('COMMIT');
+          return {
+            key: fileKey,
+            url: `${this.r2Endpoint}/${this.r2Bucket}/${fileKey}`,
+            resumeParsed,
+          };
+        }
+
+        // 5. Insert into resumes table so recruiting platform can find it
+        const parsed = resumeParsed as any;
+        const resumeId = randomUUID();
+
+        const extension = file.originalname.includes('.')
+          ? (file.originalname.split('.').pop() || 'pdf').toLowerCase()
+          : 'pdf';
+
+        await db.query(
+          `INSERT INTO resumes (
+            id, tenant_id, uploaded_by, candidate_name, candidate_email,
+            candidate_phone, file_path, file_name, file_type,
+            skills, experience_years, education, "current_role",
+            created_at, updated_at
+          ) VALUES (
+            $1, $2, $3, $4, $5, $6, $7, $8, $9,
+            $10, $11, $12, $13, now(), now()
+          ) ON CONFLICT DO NOTHING`,
+          [
+            resumeId,
+            tenantId,
+            userId,
+            parsed.name || file.originalname,
+            parsed.email || null,
+            parsed.phone || null,
+            fileKey,
+            file.originalname,
+            extension,
+            parsed.skills && parsed.skills.length > 0 ? parsed.skills : [],
+            parsed.experience_years || null,
+            parsed.education || null,
+            parsed.current_role || null,
+          ],
+        );
+
+        await db.query('COMMIT');
+      } catch (dbError) {
+        await db.query('ROLLBACK');
+        throw dbError;
+      } finally {
+        db.release();
       }
-
-      // 5. Insert into resumes table so recruiting platform can find it
-      const parsed = resumeParsed as any;
-      const resumeId = randomUUID();
-
-      const extension = file.originalname.includes('.')
-        ? (file.originalname.split('.').pop() || 'pdf').toLowerCase()
-        : 'pdf';
-
-      await this.pool.query(
-        `INSERT INTO resumes (
-          id, tenant_id, uploaded_by, candidate_name, candidate_email,
-          candidate_phone, file_path, file_name, file_type,
-          skills, experience_years, education, "current_role",
-          created_at, updated_at
-        ) VALUES (
-          $1, $2, $3, $4, $5, $6, $7, $8, $9,
-          $10, $11, $12, $13, now(), now()
-        ) ON CONFLICT DO NOTHING`,
-        [
-          resumeId,
-          tenantId,
-          userId,
-          parsed.name || file.originalname,
-          parsed.email || null,
-          parsed.phone || null,
-          fileKey,
-          file.originalname,
-          extension,
-          parsed.skills && parsed.skills.length > 0 ? parsed.skills : [],
-          parsed.experience_years || null,
-          parsed.education || null,
-          parsed.current_role || null,
-        ],
-      );
 
       return {
         key: fileKey,
@@ -175,9 +190,10 @@ export class UploadsService {
           );
       }
       console.error('Post-upload step FAILED:', error.message, error.stack);
-      throw new InternalServerErrorException(
-        'Post upload processing failed: ' + error.message,
-      );
+      if (error instanceof UnauthorizedException) {
+        throw error;
+      }
+      throw new InternalServerErrorException('Post-upload processing failed');
     }
   }
 

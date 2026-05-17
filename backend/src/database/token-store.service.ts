@@ -19,6 +19,7 @@ export class TokenStoreService implements OnModuleInit {
       console.log('Shared tokens table initialized');
     } catch (error) {
       console.error('Failed to initialize shared tokens table:', error);
+      throw error;
     }
   }
 

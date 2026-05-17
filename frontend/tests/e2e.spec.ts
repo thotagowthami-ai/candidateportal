@@ -19,7 +19,9 @@ test('login redirects to resume page', async ({ page }) => {
           id: 'test-123',
           email: process.env.E2E_TEST_EMAIL || 'test@example.com',
           firstName: 'Test',
-          lastName: 'User'
+          lastName: 'User',
+          lastLogin: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
         }
       }
     });
@@ -35,7 +37,9 @@ test('login redirects to resume page', async ({ page }) => {
         email: process.env.E2E_TEST_EMAIL || 'test@example.com',
         firstName: 'Test',
         lastName: 'User',
-        resumeUrl: null
+        resumeUrl: null,
+        lastLogin: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
       }
     });
   });

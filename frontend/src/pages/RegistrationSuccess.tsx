@@ -37,8 +37,8 @@ export default function RegistrationSuccess() {
             <button
               onClick={() => {
                 sessionStorage.removeItem("registrationDone");
-                localStorage.removeItem("email");
-                localStorage.removeItem("registerData");
+                sessionStorage.removeItem("email");
+                sessionStorage.removeItem("registerDraft");
                 navigate("/login", { replace: true });
               }}
               className="mt-8 w-full py-4 btn-gradient rounded-md text-sm font-bold tracking-wide shadow-lg shadow-primary/10 active:scale-[0.98] flex items-center justify-center gap-3 transition-all"

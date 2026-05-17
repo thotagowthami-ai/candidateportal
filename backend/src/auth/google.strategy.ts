@@ -5,12 +5,15 @@ import { Strategy, VerifyCallback } from 'passport-google-oauth20';
 @Injectable()
 export class GoogleStrategy extends PassportStrategy(Strategy, 'google') {
   constructor() {
+    const callbackURL = process.env.GOOGLE_REDIRECT_URI;
+    if (!callbackURL) {
+      throw new Error('GOOGLE_REDIRECT_URI is required');
+    }
+
     super({
       clientID: process.env.GOOGLE_CLIENT_ID!,
       clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
-      callbackURL:
-        process.env.GOOGLE_REDIRECT_URI ||
-        'https://candidateportal-production.up.railway.app/api/auth/google/callback',
+      callbackURL,
       scope: ['email', 'profile'],
     });
   }
@@ -21,9 +24,15 @@ export class GoogleStrategy extends PassportStrategy(Strategy, 'google') {
     profile: any,
     done: VerifyCallback,
   ): Promise<any> {
-    const { name, emails } = profile;
+    const { name, emails } = profile ?? {};
+    const email = emails?.[0]?.value;
+
+    if (!email) {
+      return done(new Error('Google account email is unavailable'), false);
+    }
+
     const user = {
-      email: emails[0].value,
+      email,
       firstName: name?.givenName || 'Google',
       lastName: name?.familyName || 'User',
       accessToken,

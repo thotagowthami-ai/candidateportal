@@ -14,6 +14,7 @@ const initialForm = {
 export default function Register() {
   const navigate = useNavigate();
   const [form, setForm] = useState(initialForm);
+  const [countryCode, setCountryCode] = useState("+91");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -35,10 +36,23 @@ export default function Register() {
   const submit = async () => {
     if (!form.email || !form.firstName || !form.lastName || !form.phone) return;
 
+    const normalizedPhone = `${countryCode}${form.phone.trim().replace(/[^\d]/g, "")}`;
+    const e164Regex = /^\+[1-9]\d{7,14}$/;
+    
+    if (!e164Regex.test(normalizedPhone)) {
+      setError("Please enter a valid phone number.");
+      return;
+    }
+
+    const payload = {
+      ...form,
+      phone: normalizedPhone,
+    };
+
     try {
       setLoading(true);
       setError("");
-      await api.post("/auth/initiate", form);
+      await api.post("/auth/initiate", payload);
       sessionStorage.setItem("email", form.email);
       sessionStorage.setItem("registerDraft", JSON.stringify(form));
       navigate("/verify");
@@ -142,13 +156,23 @@ export default function Register() {
             <div className="space-y-2">
               <label className="text-[10px] font-bold uppercase tracking-widest text-on-surface_variant/60">Phone Number</label>
               <div className="flex items-center gap-0 rounded-md bg-surface-container-low border-2 border-transparent focus-within:border-primary-container focus-within:bg-surface-bright focus-within:ring-4 focus-within:ring-primary-container/10 transition-all duration-300 overflow-hidden">
-                <span className="px-4 py-2.5 text-sm text-on-surface_variant/50 font-bold bg-surface-container-high">+91</span>
+                <select
+                  value={countryCode}
+                  onChange={(e) => setCountryCode(e.target.value)}
+                  className="px-3 py-2.5 text-sm text-on-surface font-semibold bg-surface-container-high border-none outline-none cursor-pointer focus:bg-surface-bright"
+                >
+                  <option value="+91">+91 (IN)</option>
+                  <option value="+1">+1 (US)</option>
+                  <option value="+44">+44 (UK)</option>
+                  <option value="+61">+61 (AU)</option>
+                  <option value="+971">+971 (AE)</option>
+                </select>
                 <input
                   type="tel"
                   value={form.phone}
-                  onChange={(e) => handleChange("phone", e.target.value)}
+                  onChange={(e) => handleChange("phone", e.target.value.replace(/[^\d]/g, ""))}
                   className="w-full bg-transparent px-4 py-2.5 text-sm text-on-surface placeholder:text-on-surface_variant/30 outline-none"
-                  placeholder="98765 43210"
+                  placeholder="9876543210"
                   required
                 />
               </div>
