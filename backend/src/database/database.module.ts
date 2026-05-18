@@ -39,12 +39,35 @@ import { TokenStoreService } from './token-store.service';
           });
         }
 
+        const host = configService.get<string>('PGHOST');
+        const portVal = configService.get<string>('PGPORT', '5432');
+        const port = Number(portVal);
+        const user = configService.get<string>('PGUSER');
+        const password = configService.get<string>('PGPASSWORD');
+        const database = configService.get<string>('PGDATABASE');
+
+        if (!host) {
+          throw new Error('Missing database configuration: PGHOST is not defined.');
+        }
+        if (Number.isNaN(port)) {
+          throw new Error('Missing database configuration: PGPORT is not a valid number.');
+        }
+        if (!user) {
+          throw new Error('Missing database configuration: PGUSER is not defined.');
+        }
+        if (!password) {
+          throw new Error('Missing database configuration: PGPASSWORD is not defined.');
+        }
+        if (!database) {
+          throw new Error('Missing database configuration: PGDATABASE is not defined.');
+        }
+
         return new Pool({
-          host: configService.get<string>('PGHOST', '127.0.0.1'),
-          port: Number(configService.get<string>('PGPORT', '5432')),
-          user: configService.get<string>('PGUSER', 'postgres'),
-          password: configService.get<string>('PGPASSWORD', 'postgres'),
-          database: configService.get<string>('PGDATABASE', 'candidateportal'),
+          host,
+          port,
+          user,
+          password,
+          database,
           ssl,
         });
       },

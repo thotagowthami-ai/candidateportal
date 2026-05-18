@@ -11,6 +11,7 @@ import {
   Res,
   UnauthorizedException,
   BadRequestException,
+  ForbiddenException,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 
@@ -71,18 +72,43 @@ export class UsersController {
   }
   @Post('send-otp')
   @UseGuards(AuthGuard('jwt'))
-  async sendOtp(@Body('phone') phone: string) {
-    if (!phone) throw new BadRequestException('Phone number required');
-    return this.usersService.sendOtp(phone);
+  async sendOtp(
+    @Req() req: { user: { email: string } },
+    @Body('phone') bodyPhone?: string,
+  ) {
+    const user = await this.usersService.getCurrentUser(req.user.email);
+    const userPhone = user.phone;
+    if (!userPhone) {
+      throw new BadRequestException('User does not have a registered phone number.');
+    }
+    if (bodyPhone && bodyPhone !== userPhone) {
+      throw new ForbiddenException(
+        'Forbidden: Destination phone number does not match caller registered phone number',
+      );
+    }
+    return this.usersService.sendOtp(userPhone);
   }
 
   @Post('verify-otp')
   @UseGuards(AuthGuard('jwt'))
-  async verifyOtp(@Body() body: { phone: string; otp: string }) {
-    if (!body.phone || !body.otp) {
-      throw new BadRequestException('Phone number and OTP required');
+  async verifyOtp(
+    @Req() req: { user: { email: string } },
+    @Body() body: { phone?: string; otp: string },
+  ) {
+    if (!body.otp) {
+      throw new BadRequestException('OTP is required.');
     }
-    return this.usersService.verifyOtp(body.phone, body.otp);
+    const user = await this.usersService.getCurrentUser(req.user.email);
+    const userPhone = user.phone;
+    if (!userPhone) {
+      throw new BadRequestException('User does not have a registered phone number.');
+    }
+    if (body.phone && body.phone !== userPhone) {
+      throw new ForbiddenException(
+        'Forbidden: Destination phone number does not match caller registered phone number',
+      );
+    }
+    return this.usersService.verifyOtp(userPhone, body.otp);
   }
 
   // --- NEW: REPLACE EXISTING RESUME ROUTE ---

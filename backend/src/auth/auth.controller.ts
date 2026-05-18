@@ -10,6 +10,13 @@ import {
 import type { Response } from 'express';
 import { AuthGuard } from '@nestjs/passport';
 import { AuthService } from './auth.service';
+import { InitiateRegistrationDto } from './dto/initiate-registration.dto';
+import { ResendOtpDto } from './dto/resend-otp.dto';
+import { VerifyOtpDto } from './dto/verify-otp.dto';
+import { ForgotPasswordDto } from './dto/forgot-password.dto';
+import { ResetPasswordDto } from './dto/reset-password.dto';
+import { ContactDto } from './dto/contact.dto';
+import { ExchangeDto } from './dto/exchange.dto';
 
 @Controller('auth')
 export class AuthController {
@@ -17,51 +24,49 @@ export class AuthController {
 
   // ✅ Page 1 — initiate registration + send OTP
   @Post('initiate')
-  initiate(@Body() body: any) {
-    return this.authService.initiate(body);
+  initiate(@Body() dto: InitiateRegistrationDto) {
+    return this.authService.initiate(dto);
   }
 
   // ✅ Send OTP manually (optional)
   @Post('send-otp')
-  sendOtp(@Body('email') email: string) {
-    console.log('Sending OTP request');
-
-    return this.authService.sendOtp(email);
+  sendOtp(@Body() dto: ResendOtpDto) {
+    return this.authService.sendOtp(dto.email);
   }
 
   // ✅ Resend OTP
   @Post('resend-otp')
-  resendOtp(@Body('email') email: string) {
-    return this.authService.resendOtp(email);
+  resendOtp(@Body() dto: ResendOtpDto) {
+    return this.authService.resendOtp(dto.email);
   }
 
   // ✅ Verify OTP (Page 2)
   @Post('verify-otp')
-  verifyOtp(@Body('email') email: string, @Body('otp') otp: string) {
-    return this.authService.verifyOtp(email, otp);
+  verifyOtp(@Body() dto: VerifyOtpDto) {
+    return this.authService.verifyOtp(dto.email, dto.otp);
   }
 
   // ✅ Forgot password (send reset link)
   @Post('forgot-password')
-  forgotPassword(@Body('email') email: string) {
-    return this.authService.requestPasswordReset(email);
+  forgotPassword(@Body() dto: ForgotPasswordDto) {
+    return this.authService.requestPasswordReset(dto.email);
   }
 
   // ✅ Verify reset link (magic login)
   @Post('reset-password')
-  resetPassword(@Body('email') email: string, @Body('token') token: string) {
-    return this.authService.verifyResetToken(email, token);
+  resetPassword(@Body() dto: ResetPasswordDto) {
+    return this.authService.verifyResetToken(dto.email, dto.token);
   }
 
   // ✅ Contact Team (Lead generation)
   @Post('contact')
-  contactTeam(@Body() body: any) {
-    return this.authService.contactTeam(body);
+  contactTeam(@Body() dto: ContactDto) {
+    return this.authService.contactTeam(dto);
   }
 
   @Post('exchange')
-  exchange(@Body('code') code: string) {
-    return this.authService.exchangeCode(code);
+  exchange(@Body() dto: ExchangeDto) {
+    return this.authService.exchangeCode(dto.code);
   }
 
   // ✅ Google OAuth — Step 1: Redirect user to Google consent screen

@@ -1,4 +1,5 @@
-import { IsOptional, IsString, IsArray, IsNumberString } from 'class-validator';
+import { IsOptional, IsString, IsArray, IsNumberString, IsBoolean } from 'class-validator';
+import { Transform } from 'class-transformer';
 
 export class UpdateProfileDto {
   @IsOptional()
@@ -42,8 +43,12 @@ export class UpdateProfileDto {
   email?: string;
 
   @IsOptional()
+  @IsBoolean()
+  @Transform(({ value }) => (value === 'true' ? true : value === 'false' ? false : value))
   visibility?: boolean;
 
   @IsOptional()
+  @IsBoolean()
+  @Transform(({ value }) => (value === 'true' ? true : value === 'false' ? false : value))
   searchable?: boolean;
 }

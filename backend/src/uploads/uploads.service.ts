@@ -4,6 +4,8 @@ import {
   InternalServerErrorException,
   BadRequestException,
   UnauthorizedException,
+  Logger,
+  HttpException,
 } from '@nestjs/common';
 import {
   S3Client,
@@ -16,9 +18,11 @@ import { randomUUID } from 'crypto';
 import { Pool } from 'pg';
 import { PG_POOL } from '../database/database.constants';
 import { ResumeParserService } from '../users/resume-parser.service';
+import type { ResumeParsed } from '../users/schemas/user.schema';
 
 @Injectable()
 export class UploadsService {
+  private readonly logger = new Logger(UploadsService.name);
   private readonly r2Endpoint: string;
   private readonly r2Bucket: string;
   private readonly r2Client: S3Client;
@@ -74,8 +78,7 @@ export class UploadsService {
 
     let uploaded = false;
     try {
-      console.log('R2 upload starting, endpoint:', this.r2Endpoint);
-      console.log('R2 bucket:', this.r2Bucket);
+      this.logger.log('R2 upload starting');
 
       // 1. Upload file to R2
       await this.r2Client.send(
@@ -87,10 +90,10 @@ export class UploadsService {
         }),
       );
       uploaded = true;
-      console.log('R2 upload success:', fileKey);
+      this.logger.log('R2 upload success');
     } catch (err) {
       const error = err as Error;
-      console.error('R2 upload FAILED:', error.message, error.stack);
+      this.logger.error(`R2 upload failed: ${error.message}`);
       throw new InternalServerErrorException('File upload failed');
     }
 
@@ -117,7 +120,7 @@ export class UploadsService {
         const tenantId = process.env.RECRUITING_TENANT_ID;
 
         if (!tenantId) {
-          console.warn('RECRUITING_TENANT_ID not set, skipping resumes insert');
+          this.logger.warn('RECRUITING_TENANT_ID not set, skipping resumes insert');
           await db.query('COMMIT');
           return {
             key: fileKey,
@@ -127,7 +130,7 @@ export class UploadsService {
         }
 
         // 5. Insert into resumes table so recruiting platform can find it
-        const parsed = resumeParsed as any;
+        const parsed: ResumeParsed = resumeParsed;
         const resumeId = randomUUID();
 
         const extension = file.originalname.includes('.')
@@ -148,9 +151,9 @@ export class UploadsService {
             resumeId,
             tenantId,
             userId,
-            parsed.name || file.originalname,
-            parsed.email || null,
-            parsed.phone || null,
+            parsed.fullName || file.originalname,
+            parsed.emails?.[0] || null,
+            parsed.phones?.[0] || null,
             fileKey,
             file.originalname,
             extension,
@@ -177,7 +180,7 @@ export class UploadsService {
     } catch (err) {
       const error = err as Error;
       if (uploaded) {
-        console.warn('Attempting rollback for orphaned object:', fileKey);
+        this.logger.warn('Attempting rollback for orphaned object');
         await this.r2Client
           .send(
             new DeleteObjectCommand({
@@ -186,11 +189,14 @@ export class UploadsService {
             }),
           )
           .catch((delErr) =>
-            console.error('Rollback deletion FAILED:', delErr.message),
+            this.logger.error(`Rollback deletion failed: ${delErr.message}`),
           );
       }
-      console.error('Post-upload step FAILED:', error.message, error.stack);
-      if (error instanceof UnauthorizedException) {
+      this.logger.error(`Post-upload step failed: ${error.message}`);
+      if (
+        error instanceof UnauthorizedException ||
+        (error instanceof HttpException && error.getStatus() < 500)
+      ) {
         throw error;
       }
       throw new InternalServerErrorException('Post-upload processing failed');

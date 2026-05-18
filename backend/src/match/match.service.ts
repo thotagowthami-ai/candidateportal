@@ -150,17 +150,18 @@ export class MatchService {
   }
 
   private scoreCandidate(candidate: CandidateRow, requiredSkills: string[]) {
+    const normalizedRequiredSkills = this.normalizeSkills(requiredSkills);
     const candidateSkills = this.normalizeSkills(
       candidate.resume_parsed?.skills ?? [],
     );
-    const matchedSkills = requiredSkills.filter((skill) =>
+    const matchedSkills = normalizedRequiredSkills.filter((skill) =>
       candidateSkills.includes(skill),
     );
-    const missingSkills = requiredSkills.filter(
+    const missingSkills = normalizedRequiredSkills.filter(
       (skill) => !matchedSkills.includes(skill),
     );
     const matchScore = Math.round(
-      (matchedSkills.length / requiredSkills.length) * 100,
+      (matchedSkills.length / normalizedRequiredSkills.length) * 100,
     );
 
     return {

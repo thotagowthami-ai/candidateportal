@@ -12,10 +12,22 @@ export class TokenStoreService implements OnModuleInit {
         CREATE TABLE IF NOT EXISTS shared_tokens (
           key TEXT PRIMARY KEY,
           value JSONB NOT NULL,
-          expires_at TIMESTAMP NOT NULL
+          expires_at TIMESTAMPTZ NOT NULL
         );
         CREATE INDEX IF NOT EXISTS idx_shared_tokens_expires_at ON shared_tokens(expires_at);
       `);
+
+      // Migration: Alter existing column type to TIMESTAMPTZ
+      await this.pool
+        .query(
+          `
+        ALTER TABLE shared_tokens ALTER COLUMN expires_at TYPE TIMESTAMPTZ;
+      `,
+        )
+        .catch(() => {
+          /* Ignore error if migration already ran */
+        });
+
       console.log('Shared tokens table initialized');
     } catch (error) {
       console.error('Failed to initialize shared tokens table:', error);
@@ -24,6 +36,9 @@ export class TokenStoreService implements OnModuleInit {
   }
 
   async set(key: string, value: any, ttlSeconds: number) {
+    if (!Number.isFinite(ttlSeconds) || ttlSeconds <= 0) {
+      throw new Error('ttlSeconds must be a positive number');
+    }
     const expiresAt = new Date(Date.now() + ttlSeconds * 1000);
     await this.pool.query(
       `INSERT INTO shared_tokens (key, value, expires_at) 

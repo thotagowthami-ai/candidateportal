@@ -57,12 +57,13 @@ export class SmsController {
 
     // 2. Enforce that the destination phone number belongs to the authenticated caller
     const dbResult = await this.pool.query(
-      'SELECT phone FROM users WHERE email = $1 LIMIT 1',
+      'SELECT phone, phone_verified FROM users WHERE email = $1 LIMIT 1',
       [req.user.email],
     );
 
     const userPhone = dbResult.rows[0]?.phone;
-    if (!userPhone || userPhone !== body.phone) {
+    const isPhoneVerified = dbResult.rows[0]?.phone_verified;
+    if (!userPhone || userPhone !== body.phone || !isPhoneVerified) {
       throw new HttpException(
         'Forbidden: Destination phone number does not match caller verified phone number',
         HttpStatus.FORBIDDEN,

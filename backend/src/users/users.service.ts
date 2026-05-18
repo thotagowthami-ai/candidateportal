@@ -39,6 +39,7 @@ type UserRow = {
   created_at: string;
   updated_at: string;
   last_login: string | null;
+  role: string;
 };
 
 @Injectable()
@@ -76,10 +77,18 @@ export class UsersService {
     // 1. Generate a random 4-digit code
     const otpCode = randomInt(1000, 10000).toString();
 
+    const key = `user_otp:${normalizedPhone}`;
+    const existing = await this.tokenStore.get(key);
+    if (existing) {
+      throw new BadRequestException(
+        'OTP already sent. Please wait before requesting a new code.',
+      );
+    }
+
     // 2. Store the hashed OTP in PostgreSQL (expires in 10 minutes)
     const hashedOtp = this.hashOtp(otpCode);
     await this.tokenStore.set(
-      `user_otp:${normalizedPhone}`,
+      key,
       { hash: hashedOtp, attempts: 0 },
       10 * 60,
     );
@@ -145,6 +154,12 @@ export class UsersService {
 
     // 4. Success! Delete the OTP so it can't be used again
     await this.tokenStore.delete(key);
+
+    await this.pool.query(
+      'UPDATE users SET phone_verified = true WHERE phone = $1',
+      [normalizedPhone],
+    );
+
     return { success: true, message: 'Phone number verified successfully' };
   }
   // -----------------------------
@@ -207,24 +222,22 @@ export class UsersService {
 
       userId = result.rows[0].id;
 
+      const { url: resumeUrl, key: resumeKey } =
+        await this.uploadsService.uploadResume(file, userId);
+
+      const updated = await client.query<UserRow>(
+        `UPDATE users SET resume_url = $1, resume_key = $2, updated_at = now() WHERE id = $3 RETURNING *`,
+        [resumeUrl, resumeKey, userId],
+      );
+
       await client.query('COMMIT');
+      return this.mapUser(updated.rows[0]);
     } catch (err) {
       await client.query('ROLLBACK');
       throw err;
     } finally {
       client.release();
     }
-
-    // Perform slow R2 network upload and subsequent update outside of SQL transaction
-    const { url: resumeUrl, key: resumeKey } =
-      await this.uploadsService.uploadResume(file, userId);
-
-    const updated = await this.pool.query<UserRow>(
-      `UPDATE users SET resume_url = $1, resume_key = $2, updated_at = now() WHERE id = $3 RETURNING *`,
-      [resumeUrl, resumeKey, userId],
-    );
-
-    return this.mapUser(updated.rows[0]);
   }
 
   async replaceResume(email: string, file: Express.Multer.File) {
@@ -356,6 +369,9 @@ export class UsersService {
       }
 
       const googleUser = await googleResponse.json();
+      if (!googleUser?.email || typeof googleUser.email !== 'string') {
+        throw new BadGatewayException('Google account email is unavailable');
+      }
       const normalizedEmail = googleUser.email.trim().toLowerCase();
 
       let userWithResume: any;
@@ -399,6 +415,7 @@ export class UsersService {
       const accessToken = await this.jwtService.signAsync({
         sub: userWithResume.id,
         email: userWithResume.email,
+        role: userWithResume.role,
       });
 
       return {
@@ -500,6 +517,7 @@ export class UsersService {
     const accessToken = await this.jwtService.signAsync({
       sub: userWithResume.id,
       email: userWithResume.email,
+      role: userWithResume.role,
     });
 
     return {
@@ -582,7 +600,7 @@ export class UsersService {
   async downloadResume(
     candidateId: string,
     res: ExpressResponse,
-    requestUser: { sub?: string; email: string },
+    requestUser: { sub?: string; email: string; role?: string },
   ) {
     await this.schemaReady;
     const candidateUser = await this.findById(candidateId);
@@ -594,9 +612,7 @@ export class UsersService {
     const isOwner =
       requestUser.sub === candidateId ||
       requestUser.email === candidateUser.email;
-    const isAdmin =
-      requestUser.email?.endsWith('@recruitapp.com') ||
-      requestUser.email?.startsWith('admin@');
+    const isAdmin = await this.isAdminFromRole(requestUser);
 
     if (!isOwner && !isAdmin) {
       throw new ForbiddenException(
@@ -663,7 +679,8 @@ export class UsersService {
         email_verified BOOLEAN NOT NULL DEFAULT FALSE,
         created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
         updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-        last_login TIMESTAMPTZ
+        last_login TIMESTAMPTZ,
+        role TEXT NOT NULL DEFAULT 'candidate'
       );
     `);
 
@@ -686,6 +703,15 @@ export class UsersService {
       .catch(() => {
         /* Ignore if column already exists */
       });
+
+    // Add role column for existing tables
+    await this.pool
+      .query(
+        `ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'candidate';`,
+      )
+      .catch(() => {
+        /* Ignore if column already exists */
+      });
   }
 
   private mapUser(row: UserRow) {
@@ -704,7 +730,21 @@ export class UsersService {
       createdAt: row.created_at,
       updatedAt: row.updated_at,
       lastLogin: row.last_login,
+      role: row.role || 'candidate',
     };
+  }
+
+  private async isAdminFromRole(requestUser: { sub?: string; email: string; role?: string }): Promise<boolean> {
+    if (requestUser.role) {
+      return requestUser.role === 'admin' || requestUser.role === 'recruiter';
+    }
+
+    try {
+      const user = await this.getCurrentUser(requestUser.email);
+      return user.role === 'admin' || user.role === 'recruiter';
+    } catch {
+      return false;
+    }
   }
 
   private extractResumeKey(resumeUrl: string) {

@@ -2,6 +2,7 @@ import {
   Injectable,
   BadRequestException,
   UnauthorizedException,
+  Logger,
 } from '@nestjs/common';
 import { randomBytes, randomInt } from 'crypto';
 import { Resend } from 'resend';
@@ -11,6 +12,7 @@ import { TokenStoreService } from '../database/token-store.service';
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
   private resend: Resend;
 
   constructor(
@@ -40,12 +42,21 @@ export class AuthService {
     const normalizedEmail = this.normalizeEmail(email);
     if (!normalizedEmail) throw new BadRequestException('Email is required.');
 
+    if (data?.phone) {
+      const phone = data.phone.trim();
+      if (!/^\+[1-9]\d{7,14}$/.test(phone)) {
+        throw new BadRequestException(
+          'Phone number must be provided in E.164 format (e.g. +91XXXXXXXXXX).',
+        );
+      }
+    }
+
     const otp = randomInt(100000, 1000000).toString();
 
     // Store in TokenStore with 5 minute TTL
     await this.tokenStore.set(`otp:${normalizedEmail}`, { otp, data }, 5 * 60);
 
-    console.log('Sending OTP to', normalizedEmail.replace(/(.{2}).*(@.*)/, '$1***$2'));
+    this.logger.log('Sending OTP to candidate');
 
     try {
       await this.resend.emails.send({
@@ -62,12 +73,6 @@ export class AuthService {
       // --- NEW: Also send SMS if phone is provided in data ---
       if (data?.phone) {
         const phone = data.phone.trim();
-        if (!/^\+[1-9]\d{7,14}$/.test(phone)) {
-          throw new BadRequestException(
-            'Phone number must be provided in E.164 format (e.g. +91XXXXXXXXXX).',
-          );
-        }
-
         const smsMessage = `Your RecruitApp verification code is: ${otp}. Valid for 5 minutes.`;
         const smsResult = await this.smsService.sendCandidateSMS(
           phone,
@@ -80,7 +85,7 @@ export class AuthService {
               : 'Failed to send OTP SMS.',
           );
         }
-        console.log(`SMS OTP sent to ***${phone.slice(-4)}`);
+        this.logger.log('SMS OTP sent successfully');
       }
     } catch (error: any) {
       const reason = error?.message || error?.response?.data?.message;
@@ -100,12 +105,25 @@ export class AuthService {
 
   async verifyOtp(email: string, otp: string) {
     const normalizedEmail = this.normalizeEmail(email);
+    const attemptsKey = `otp_attempts:${normalizedEmail}`;
+
+    const attempts = (await this.tokenStore.get(attemptsKey)) ?? 0;
+    if (attempts >= 5) {
+      throw new BadRequestException(
+        'Too many invalid OTP attempts. Please request a new OTP.',
+      );
+    }
+
     const record = await this.tokenStore.get(`otp:${normalizedEmail}`);
 
     if (!record) throw new BadRequestException('OTP not found or expired');
-    if (record.otp !== otp) throw new BadRequestException('Invalid OTP');
+    if (record.otp !== otp) {
+      await this.tokenStore.set(attemptsKey, attempts + 1, 5 * 60);
+      throw new BadRequestException('Invalid OTP');
+    }
 
     await this.tokenStore.delete(`otp:${normalizedEmail}`);
+    await this.tokenStore.delete(attemptsKey);
 
     // Check if user already exists (login flow)
     const existingUser = await this.usersService.findByEmail(normalizedEmail);
@@ -237,7 +255,7 @@ export class AuthService {
       const tokenData = await tokenResponse.json();
 
       if (!tokenResponse.ok) {
-        console.error('Google token exchange failed:', tokenData);
+        this.logger.error('Google token exchange failed');
         throw new UnauthorizedException('Failed to exchange Google code');
       }
 
@@ -247,7 +265,7 @@ export class AuthService {
       if (error.name === 'AbortError') {
         throw new UnauthorizedException('Google authentication timed out');
       }
-      console.error('googleLoginWithCode error:', error);
+      this.logger.error('googleLoginWithCode error');
       throw new UnauthorizedException('Google authentication failed');
     }
   }
@@ -283,7 +301,7 @@ export class AuthService {
     return { accessToken: record.accessToken, user: record.user };
   }
 
-  private escapeHtml(str: string): string {
+  private escapeHtml(str?: string): string {
     return String(str ?? '')
       .replace(/&/g, '&amp;')
       .replace(/</g, '&lt;')
@@ -294,9 +312,9 @@ export class AuthService {
 
   async contactTeam(data: {
     firstName: string;
-    lastName: string;
+    lastName?: string;
     email: string;
-    phone: string;
+    phone?: string;
   }) {
     if (!data.firstName || !data.email) {
       throw new BadRequestException('Required fields missing.');
@@ -324,7 +342,7 @@ export class AuthService {
       });
       return { message: 'Contact request sent successfully.' };
     } catch (error: any) {
-      console.error('Contact email error:', error);
+      this.logger.error('Contact email error');
       throw new BadRequestException('Failed to send contact request.');
     }
   }

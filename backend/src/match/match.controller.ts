@@ -7,6 +7,7 @@ import {
   UseGuards,
   Query,
   BadRequestException,
+  ForbiddenException,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -34,7 +35,19 @@ export class MatchController {
 
   @Post('jd/user/:userId')
   @UseGuards(AuthGuard('jwt'))
-  matchJdForUser(@Body() body: MatchJdDto, @Param('userId') userId: string) {
+  matchJdForUser(
+    @Body() body: MatchJdDto,
+    @Param('userId') userId: string,
+    @Req() req: { user: { sub?: string; id?: string; role?: string; email?: string } },
+  ) {
+    const callerId = req.user?.sub ?? req.user?.id;
+    const isPrivileged =
+      req.user?.role === 'admin' ||
+      req.user?.role === 'recruiter';
+
+    if (!isPrivileged && callerId !== userId) {
+      throw new ForbiddenException('Not allowed to access this user');
+    }
     return this.matchService.matchByJdForUserId(body, userId);
   }
 
@@ -45,7 +58,15 @@ export class MatchController {
   async saveMatchesForJob(
     @Query('jobDescriptionId') jobDescriptionId: string,
     @Body() body: MatchJdDto,
+    @Req() req: { user: { role?: string; email?: string } },
   ) {
+    const isPrivileged =
+      req.user?.role === 'admin' ||
+      req.user?.role === 'recruiter';
+
+    if (!isPrivileged) {
+      throw new ForbiddenException('Insufficient permissions');
+    }
     if (!jobDescriptionId?.trim()) {
       throw new BadRequestException('jobDescriptionId query param is required');
     }
