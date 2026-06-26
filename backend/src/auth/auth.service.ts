@@ -38,6 +38,17 @@ export class AuthService {
     return this.sendOtp(email, { ...data, email });
   }
 
+  async initiateLogin(emailRaw: string) {
+    const email = this.normalizeEmail(emailRaw);
+    if (!email) throw new BadRequestException('Email is required.');
+
+    const existingUser = await this.usersService.findByEmail(email);
+    if (!existingUser)
+      throw new BadRequestException('User not found. Please register.');
+
+    return this.sendOtp(email);
+  }
+
   async sendOtp(email: string, data?: any) {
     const normalizedEmail = this.normalizeEmail(email);
     if (!normalizedEmail) throw new BadRequestException('Email is required.');
@@ -56,13 +67,16 @@ export class AuthService {
     // Store in TokenStore with 5 minute TTL
     await this.tokenStore.set(`otp:${normalizedEmail}`, { otp, data }, 5 * 60);
 
+    if (process.env.DEV_BYPASS_OTP === 'true') {
+      this.logger.warn(`DEV_BYPASS_OTP enabled; OTP for ${normalizedEmail}: ${otp}`);
+    }
     this.logger.log('Sending OTP to candidate');
 
     try {
       await this.resend.emails.send({
         from: process.env.EMAIL_FROM!,
         to: normalizedEmail,
-        subject: 'Register Portal Email Verification',
+        subject: 'Verification Code - Candidate Portal',
         html: `
           <h2>Email Verification</h2>
           <h1>${otp}</h1>
@@ -74,18 +88,23 @@ export class AuthService {
       if (data?.phone) {
         const phone = data.phone.trim();
         const smsMessage = `Your RecruitApp verification code is: ${otp}. Valid for 5 minutes.`;
-        const smsResult = await this.smsService.sendCandidateSMS(
-          phone,
-          smsMessage,
-        );
-        if (!smsResult.success) {
-          throw new BadRequestException(
-            smsResult.error
-              ? `Failed to send OTP SMS: ${smsResult.error}`
-              : 'Failed to send OTP SMS.',
+        try {
+          const smsResult = await this.smsService.sendCandidateSMS(
+            phone,
+            smsMessage,
+          );
+          if (!smsResult.success) {
+            this.logger.warn(
+              `Failed to send OTP SMS to ${phone}: ${smsResult.error || 'Unknown error'}. Registration proceeding via Email OTP.`,
+            );
+          } else {
+            this.logger.log('SMS OTP sent successfully');
+          }
+        } catch (smsError: any) {
+          this.logger.warn(
+            `Exception while sending OTP SMS to ${phone}: ${smsError?.message || 'Unknown error'}. Registration proceeding via Email OTP.`,
           );
         }
-        this.logger.log('SMS OTP sent successfully');
       }
     } catch (error: any) {
       const reason = error?.message || error?.response?.data?.message;
@@ -129,10 +148,11 @@ export class AuthService {
     const existingUser = await this.usersService.findByEmail(normalizedEmail);
     if (existingUser) {
       // Existing user — issue token directly
-      const { accessToken } = await this.usersService.login(normalizedEmail);
+      const { accessToken, user } = await this.usersService.login(normalizedEmail);
       return {
         message: 'OTP verified successfully',
         accessToken,
+        user,
         isNewUser: false,
       };
     }

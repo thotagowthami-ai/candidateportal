@@ -59,6 +59,9 @@ async function bootstrap() {
         return;
       }
 
+      // Keep preview origins explicit via CORS_ALLOWED_PREVIEWS because
+      // credentialed CORS is enabled below.
+
       // Explicit flag for 'null' origin
       if (origin === 'null' && trustNullOrigin) {
         callback(null, true);

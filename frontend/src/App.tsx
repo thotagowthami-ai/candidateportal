@@ -6,7 +6,6 @@ import Register from "./pages/Register";
 import VerifyOtp from "./pages/VerifyOtp";
 import UploadResume from "./pages/UploadResume";
 import RegistrationSuccess from "./pages/RegistrationSuccess";
-import ResumeViewer from "./pages/ResumeViewer";
 import Settings from "./pages/Settings";
 import ForgotPassword from "./pages/ForgotPassword";
 import ResetPassword from "./pages/ResetPassword";
@@ -80,11 +79,16 @@ export default function App() {
           <Route path="/success" element={<RegistrationSuccess />} />
         </Route>
         <Route element={<ProtectedRoute />}>
-          <Route path="/resume" element={<ResumeViewer />} />
           <Route path="/settings" element={<Settings />} />
+          <Route path="/resume" element={<Navigate to="/settings" replace />} />
           <Route path="/profile" element={<Navigate to="/settings" replace />} />
-          <Route path="/match" element={<Navigate to="/resume" replace />} />
+          <Route path="/match" element={<Navigate to="/settings" replace />} />
         </Route>
+        
+        {/* Catch-all routes */}
+        <Route path="/home" element={<Navigate to="/settings" replace />} />
+        <Route path="/dashboard" element={<Navigate to="/settings" replace />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </BrowserRouter>
   );

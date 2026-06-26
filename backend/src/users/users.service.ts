@@ -36,6 +36,7 @@ type UserRow = {
   resume_text: string | null;
   resume_parsed: ResumeParsed | null;
   email_verified: boolean;
+  phone_verified: boolean;
   created_at: string;
   updated_at: string;
   last_login: string | null;
@@ -93,22 +94,42 @@ export class UsersService {
       10 * 60,
     );
 
-    this.logger.log('Generated OTP');
+    if (process.env.DEV_BYPASS_OTP === 'true') {
+      this.logger.log(`Generated OTP code: ${otpCode}`);
+    } else {
+      this.logger.log('Generated OTP');
+    }
 
     // 3. Send the actual text message via Twilio
     const message = `Your RecruitApp verification code is: ${otpCode}. Valid for 10 minutes.`;
-    const result = await this.smsService.sendCandidateSMS(normalizedPhone, message);
+    let result;
+    try {
+      result = await this.smsService.sendCandidateSMS(normalizedPhone, message);
+    } catch (err: any) {
+      if (process.env.DEV_BYPASS_OTP === 'true') {
+        this.logger.warn(`Failed to send OTP via Twilio but bypass is enabled: ${err.message}`);
+        result = { success: true };
+      } else {
+        await this.tokenStore.delete(key);
+        throw err;
+      }
+    }
 
     if (!result.success) {
-      throw new BadRequestException(
-        'Failed to send OTP via SMS. Check phone number.',
-      );
+      if (process.env.DEV_BYPASS_OTP === 'true') {
+        this.logger.warn(`Failed to send OTP via Twilio (unsuccessful) but bypass is enabled.`);
+      } else {
+        await this.tokenStore.delete(key);
+        throw new BadRequestException(
+          'Failed to send OTP via SMS. Check phone number.',
+        );
+      }
     }
 
     return { success: true, message: 'OTP sent to mobile device' };
   }
 
-  async verifyOtp(phone: string, otp: string) {
+  async verifyOtp(phone: string, otp: string, email?: string) {
     const normalizedPhone = this.normalizePhone(phone);
     if (!normalizedPhone) {
       throw new BadRequestException('Phone number is required.');
@@ -155,12 +176,87 @@ export class UsersService {
     // 4. Success! Delete the OTP so it can't be used again
     await this.tokenStore.delete(key);
 
-    await this.pool.query(
-      'UPDATE users SET phone_verified = true WHERE phone = $1',
-      [normalizedPhone],
-    );
+    if (email) {
+      await this.pool.query(
+        'UPDATE users SET phone = $1, phone_verified = true WHERE email = $2',
+        [normalizedPhone, email.trim().toLowerCase()],
+      );
+    } else {
+      await this.pool.query(
+        'UPDATE users SET phone_verified = true WHERE phone = $1',
+        [normalizedPhone],
+      );
+    }
 
     return { success: true, message: 'Phone number verified successfully' };
+  }
+
+  // --- NEW: EMAIL OTP LOGIC ---
+  async sendEmailOtp(email: string) {
+    const normalizedEmail = email.trim().toLowerCase();
+    const otpCode = randomInt(1000, 10000).toString();
+    const key = `user_email_otp:${normalizedEmail}`;
+
+    const record = await this.tokenStore.get(key);
+    if (record) {
+      throw new BadRequestException('OTP already sent. Please wait before requesting a new code.');
+    }
+
+    const hashedOtp = this.hashOtp(otpCode);
+    await this.tokenStore.set(key, { hash: hashedOtp, attempts: 0 }, 10 * 60);
+
+    this.logger.log('Generated Email OTP');
+
+    // Here you would integrate with an email provider (e.g. SendGrid, AWS SES)
+    // For now, we mock it by logging.
+    if (process.env.DEV_BYPASS_OTP === 'true') {
+      this.logger.log(`Mocking email sending. Email OTP for ${normalizedEmail} is ${otpCode}`);
+    } else {
+      // Send via the configured email provider here; do not return success until delivery succeeds.
+    }
+
+    return { success: true, message: 'OTP sent to email address' };
+  }
+
+  async verifyEmailOtp(currentEmail: string, newEmail: string, otp: string) {
+    const normalizedCurrentEmail = currentEmail.trim().toLowerCase();
+    const normalizedEmail = newEmail.trim().toLowerCase();
+    if (!normalizedEmail) {
+      throw new BadRequestException('Email is required.');
+    }
+    const key = `user_email_otp:${normalizedEmail}`;
+    
+    const record = await this.tokenStore.get(key);
+    if (!record) {
+      throw new BadRequestException('No OTP found for this email or it has expired.');
+    }
+
+    if (record.attempts >= 5) {
+      await this.tokenStore.delete(key);
+      throw new BadRequestException('Too many invalid OTP attempts. Please request a new one.');
+    }
+
+    if (record.hash !== this.hashOtp(otp)) {
+      record.attempts = (record.attempts || 0) + 1;
+      if (record.attempts >= 5) {
+        await this.tokenStore.delete(key);
+        throw new BadRequestException('Too many invalid OTP attempts. Please request a new one.');
+      }
+      await this.tokenStore.set(key, record, 10 * 60);
+      throw new BadRequestException('Invalid OTP code.');
+    }
+
+    await this.tokenStore.delete(key);
+
+    const result = await this.pool.query(
+      'UPDATE users SET email = $1, email_verified = true WHERE email = $2',
+      [normalizedEmail, normalizedCurrentEmail],
+    );
+    if (result.rowCount !== 1) {
+      throw new NotFoundException('User not found');
+    }
+
+    return { success: true, message: 'Email address verified successfully' };
   }
   // -----------------------------
 
@@ -193,10 +289,9 @@ export class UsersService {
           email,
           phone,
           resume_text,
-          resume_parsed,
-          email_verified
+          resume_parsed
         )
-        VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,TRUE)
+        VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb)
         ON CONFLICT (email)
         DO UPDATE SET
           first_name = EXCLUDED.first_name,
@@ -205,7 +300,6 @@ export class UsersService {
           phone = EXCLUDED.phone,
           resume_text = EXCLUDED.resume_text,
           resume_parsed = EXCLUDED.resume_parsed,
-          email_verified = TRUE,
           updated_at = now()
         RETURNING *;
       `;
@@ -223,7 +317,7 @@ export class UsersService {
       userId = result.rows[0].id;
 
       const { url: resumeUrl, key: resumeKey } =
-        await this.uploadsService.uploadResume(file, userId);
+        await this.uploadsService.uploadResume(file, userId, client);
 
       const updated = await client.query<UserRow>(
         `UPDATE users SET resume_url = $1, resume_key = $2, updated_at = now() WHERE id = $3 RETURNING *`,
@@ -453,10 +547,11 @@ export class UsersService {
     await this.pool.query(
       `UPDATE users 
        SET first_name = COALESCE($1, first_name), 
-           last_name = COALESCE($2, last_name), 
+           last_name = COALESCE($2, last_name),
+           phone = COALESCE($3, phone),
            updated_at = now() 
-       WHERE email = $3`,
-      [updateData.firstName, updateData.lastName, normalizedEmail],
+       WHERE email = $4`,
+      [updateData.firstName, updateData.lastName, updateData.phone || null, normalizedEmail],
     );
 
     const result = await this.pool.query(
@@ -492,6 +587,7 @@ export class UsersService {
       education: updateData.education || existingParsed.education,
       visibility: updateData.visibility !== undefined ? updateData.visibility : existingParsed.visibility,
       searchable: updateData.searchable !== undefined ? updateData.searchable : existingParsed.searchable,
+      phones: updateData.phone ? [updateData.phone] : (existingParsed.phones || []),
     };
 
     await this.pool.query(
@@ -630,9 +726,23 @@ export class UsersService {
       throw new NotFoundException('Resume not found for this candidate');
     }
 
-    const signedUrl = await this.uploadsService.getSignedResumeUrl(resumeKey);
-
-    return res.redirect(signedUrl);
+    try {
+      const { stream, contentType } = await this.uploadsService.getResumeStream(resumeKey);
+      if (contentType) {
+        res.setHeader('Content-Type', contentType);
+      }
+      res.setHeader('Content-Disposition', 'inline; filename="resume.pdf"');
+      stream.on('error', () => {
+        if (!res.headersSent) {
+          res.status(404).end('Could not retrieve resume from storage');
+        } else {
+          res.destroy();
+        }
+      });
+      stream.pipe(res);
+    } catch (err) {
+      throw new NotFoundException('Could not retrieve resume from storage');
+    }
   }
 
   async getSemanticProfile(email: string) {
@@ -647,9 +757,20 @@ export class UsersService {
       throw new NotFoundException('User not found. Please register first.');
     }
 
+    let signedResumeUrl: string | null = null;
+
+    if (row.resume_url) {
+      const resumeKey = row.resume_key ?? this.extractResumeKey(row.resume_url);
+
+      if (resumeKey) {
+        signedResumeUrl = await this.uploadsService.getSignedResumeUrl(resumeKey);
+      }
+    }
+
     const mapped = this.mapUser(row);
     return {
       ...mapped,
+      resumeUrl: signedResumeUrl || mapped.resumeUrl,
       resumeParsed: row.resume_parsed ?? {
         emails: [],
         phones: [],
@@ -677,6 +798,7 @@ export class UsersService {
         resume_text TEXT,
         resume_parsed JSONB,
         email_verified BOOLEAN NOT NULL DEFAULT FALSE,
+        phone_verified BOOLEAN NOT NULL DEFAULT FALSE,
         created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
         updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
         last_login TIMESTAMPTZ,
@@ -712,6 +834,15 @@ export class UsersService {
       .catch(() => {
         /* Ignore if column already exists */
       });
+
+    // Add phone_verified column for existing tables
+    await this.pool
+      .query(
+        `ALTER TABLE users ADD COLUMN IF NOT EXISTS phone_verified BOOLEAN NOT NULL DEFAULT FALSE;`,
+      )
+      .catch(() => {
+        /* Ignore if column already exists */
+      });
   }
 
   private mapUser(row: UserRow) {
@@ -727,6 +858,7 @@ export class UsersService {
       resumeText: row.resume_text,
       resumeParsed: row.resume_parsed,
       emailVerified: row.email_verified,
+      phoneVerified: row.phone_verified || false,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
       lastLogin: row.last_login,

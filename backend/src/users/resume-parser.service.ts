@@ -315,7 +315,7 @@ export class ResumeParserService {
       .filter(Boolean);
 
     const degreePattern =
-      /\b(b\.?\s?tech|b\.?\s?e\b|b\.?\s?sc|bca|m\.?\s?tech|m\.?\s?e\b|m\.?\s?sc|mca|mba|phd|bachelor|master)\b/i;
+      /\b(b\.?\s?tech|b\.?\s?e\b|b\.?\s?sc|bca|m\.?\s?tech|m\.?\s?e\b|m\.?\s?sc|mca|mba|phd|bachelor|master|b\.?\s?s\b|m\.?\s?s\b|university|college|associate|diploma|degree)\b/i;
     const yearPattern = /(19|20)\d{2}/;
 
     const entries: ResumeEducationEntry[] = [];

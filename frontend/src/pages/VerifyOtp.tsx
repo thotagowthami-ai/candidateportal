@@ -69,11 +69,20 @@ export default function VerifyOtp() {
         otp: code,
       });
 
-      if (res.data?.userData) {
-        sessionStorage.setItem("registerData", JSON.stringify(res.data.userData));
+      if (res.data?.isNewUser === false) {
+        if (!res.data.accessToken || !res.data.user) {
+          setError("Verification succeeded but no session was returned. Please try again.");
+          return;
+        }
+        localStorage.setItem("authToken", res.data.accessToken);
+        localStorage.setItem("loggedInUser", JSON.stringify(res.data.user));
+        navigate("/settings");
+      } else {
+        if (res.data?.userData) {
+          sessionStorage.setItem("registerData", JSON.stringify(res.data.userData));
+        }
+        navigate("/upload");
       }
-
-      navigate("/upload");
     } catch (err: unknown) {
       setError(getApiErrorMessage(err, "Invalid OTP"));
     } finally {

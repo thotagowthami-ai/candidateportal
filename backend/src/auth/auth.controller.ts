@@ -11,6 +11,7 @@ import type { Response } from 'express';
 import { AuthGuard } from '@nestjs/passport';
 import { AuthService } from './auth.service';
 import { InitiateRegistrationDto } from './dto/initiate-registration.dto';
+import { InitiateLoginDto } from './dto/initiate-login.dto';
 import { ResendOtpDto } from './dto/resend-otp.dto';
 import { VerifyOtpDto } from './dto/verify-otp.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
@@ -26,6 +27,12 @@ export class AuthController {
   @Post('initiate')
   initiate(@Body() dto: InitiateRegistrationDto) {
     return this.authService.initiate(dto);
+  }
+
+  // ✅ Initiate login + send OTP
+  @Post('initiate-login')
+  initiateLogin(@Body() dto: InitiateLoginDto) {
+    return this.authService.initiateLogin(dto.email);
   }
 
   // ✅ Send OTP manually (optional)
@@ -91,7 +98,7 @@ export class AuthController {
       );
       const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
 
-      const redirectUrl = new URL(`${frontendUrl}/resume`);
+      const redirectUrl = new URL(`${frontendUrl}/settings`);
       redirectUrl.searchParams.set('code', code);
 
       return res.redirect(redirectUrl.toString());

@@ -11,7 +11,8 @@ export default function ForgotPassword() {
   const [loading, setLoading] = useState(false);
 
   const handleSubmit = async () => {
-    if (!email) {
+    const normalizedEmail = email.trim().toLowerCase();
+    if (!normalizedEmail) {
       setNotice("Enter your registered email to continue.");
       return;
     }
@@ -19,7 +20,7 @@ export default function ForgotPassword() {
       setLoading(true);
       setError("");
       setNotice("");
-      await api.post("/auth/forgot-password", { email });
+      await api.post("/auth/forgot-password", { email: normalizedEmail });
       setNotice("Reset link sent. Please check your inbox.");
     } catch (err: unknown) {
       setError(getApiErrorMessage(err, "Failed to send reset link."));

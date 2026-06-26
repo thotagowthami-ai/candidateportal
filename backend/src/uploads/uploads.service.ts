@@ -63,7 +63,7 @@ export class UploadsService {
       .slice(0, 255);
   }
 
-  async uploadResume(file: Express.Multer.File, userId: string) {
+  async uploadResume(file: Express.Multer.File, userId: string, dbClient?: any) {
     if (!userId) {
       throw new UnauthorizedException('Missing user identity');
     }
@@ -102,10 +102,13 @@ export class UploadsService {
       const { resumeParsed } =
         await this.resumeParserService.parseFromFile(file);
 
-      // 3. Store parsed data + file key in users table via a single database transaction
-      const db = await this.pool.connect();
+      // 3. Store parsed data + file key in users table via database transaction client
+      const db = dbClient || (await this.pool.connect());
+      const shouldManageTransaction = !dbClient;
       try {
-        await db.query('BEGIN');
+        if (shouldManageTransaction) {
+          await db.query('BEGIN');
+        }
 
         const updateResult = await db.query(
           `UPDATE users SET resume_key = $1, resume_parsed = $2, updated_at = now() WHERE id = $3`,
@@ -164,12 +167,18 @@ export class UploadsService {
           ],
         );
 
-        await db.query('COMMIT');
+        if (shouldManageTransaction) {
+          await db.query('COMMIT');
+        }
       } catch (dbError) {
-        await db.query('ROLLBACK');
+        if (shouldManageTransaction) {
+          await db.query('ROLLBACK');
+        }
         throw dbError;
       } finally {
-        db.release();
+        if (shouldManageTransaction) {
+          db.release();
+        }
       }
 
       return {
@@ -209,5 +218,17 @@ export class UploadsService {
       Key: key,
     });
     return getSignedUrl(this.r2Client, command, { expiresIn: 60 * 60 });
+  }
+
+  async getResumeStream(key: string) {
+    const command = new GetObjectCommand({
+      Bucket: this.r2Bucket,
+      Key: key,
+    });
+    const response = await this.r2Client.send(command);
+    return {
+      stream: response.Body as NodeJS.ReadableStream,
+      contentType: response.ContentType,
+    };
   }
 }

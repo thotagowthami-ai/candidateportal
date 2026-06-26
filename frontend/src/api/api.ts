@@ -16,9 +16,14 @@ const normalizeEnvApiUrl = (value?: string) => {
   return normalized;
 };
 
-const rawApiUrl = normalizeEnvApiUrl(import.meta.env.VITE_API_URL);
-const fallbackApiUrl = "http://localhost:3000/api";
-const normalizedBaseUrl = (rawApiUrl || fallbackApiUrl).replace(/\/+$/, "");
+let rawApiUrl = normalizeEnvApiUrl(import.meta.env.VITE_API_URL);
+
+// Force relative path to trigger Vercel/Vite reverse proxy and bypass ISP DNS blocks
+if (rawApiUrl.includes("cportal-production.up.railway.app") || !rawApiUrl) {
+  rawApiUrl = "/api";
+}
+
+const normalizedBaseUrl = rawApiUrl.replace(/\/+$/, "");
 
 const api = axios.create({
   baseURL: normalizedBaseUrl,
