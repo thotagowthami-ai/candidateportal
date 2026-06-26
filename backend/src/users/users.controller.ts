@@ -4,7 +4,7 @@ import {
   Get,
   Body,
   UseInterceptors,
-  UploadedFile,
+  UploadedFiles,
   UseGuards,
   Req,
   Param,
@@ -15,7 +15,7 @@ import {
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 
-import { FileInterceptor } from '@nestjs/platform-express';
+import { AnyFilesInterceptor } from '@nestjs/platform-express';
 import * as multer from 'multer';
 import { UsersService } from './users.service';
 import { CreateUserDto } from './dto/create-user.dto';
@@ -78,15 +78,12 @@ export class UsersController {
   ) {
     const user = await this.usersService.getCurrentUser(req.user.email);
     const userPhone = user.phone;
-    if (!userPhone) {
-      throw new BadRequestException('User does not have a registered phone number.');
+    
+    const targetPhone = bodyPhone || userPhone;
+    if (!targetPhone) {
+      throw new BadRequestException('Phone number is required.');
     }
-    if (bodyPhone && bodyPhone !== userPhone) {
-      throw new ForbiddenException(
-        'Forbidden: Destination phone number does not match caller registered phone number',
-      );
-    }
-    return this.usersService.sendOtp(userPhone);
+    return this.usersService.sendOtp(targetPhone);
   }
 
   @Post('verify-otp')
@@ -100,30 +97,57 @@ export class UsersController {
     }
     const user = await this.usersService.getCurrentUser(req.user.email);
     const userPhone = user.phone;
-    if (!userPhone) {
-      throw new BadRequestException('User does not have a registered phone number.');
+    
+    const targetPhone = body.phone || userPhone;
+    if (!targetPhone) {
+      throw new BadRequestException('Phone number is required.');
     }
-    if (body.phone && body.phone !== userPhone) {
-      throw new ForbiddenException(
-        'Forbidden: Destination phone number does not match caller registered phone number',
-      );
+    return this.usersService.verifyOtp(targetPhone, body.otp, req.user.email);
+  }
+
+  @Post('send-email-otp')
+  @UseGuards(AuthGuard('jwt'))
+  async sendEmailOtp(
+    @Req() req: { user: { email: string } },
+    @Body('email') bodyEmail?: string,
+  ) {
+    const targetEmail = bodyEmail || req.user.email;
+    if (!targetEmail) {
+      throw new BadRequestException('Email is required.');
     }
-    return this.usersService.verifyOtp(userPhone, body.otp);
+    return this.usersService.sendEmailOtp(targetEmail);
+  }
+
+  @Post('verify-email-otp')
+  @UseGuards(AuthGuard('jwt'))
+  async verifyEmailOtp(
+    @Req() req: { user: { email: string } },
+    @Body() body: { email?: string; otp: string },
+  ) {
+    if (!body.otp) {
+      throw new BadRequestException('OTP is required.');
+    }
+    const targetEmail = body.email || req.user.email;
+    if (!targetEmail) {
+      throw new BadRequestException('Email is required.');
+    }
+    return this.usersService.verifyEmailOtp(targetEmail, body.otp);
   }
 
   // --- NEW: REPLACE EXISTING RESUME ROUTE ---
   @Post('upload')
   @UseGuards(AuthGuard('jwt')) // Ensure the user is logged in
   @UseInterceptors(
-    FileInterceptor('file', {
+    AnyFilesInterceptor({
       storage: multer.memoryStorage(),
       limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
     }),
   )
   async replaceResume(
     @Req() req: { user: { email: string } }, // Get the logged-in user's email from JWT
-    @UploadedFile() file: Express.Multer.File, // Catch the uploaded PDF
+    @UploadedFiles() files: Express.Multer.File[],
   ) {
+    const file = files?.[0];
     if (!file) {
       throw new BadRequestException('No file uploaded');
     }
@@ -135,15 +159,19 @@ export class UsersController {
 
   @Post('create')
   @UseInterceptors(
-    FileInterceptor('file', {
+    AnyFilesInterceptor({
       storage: multer.memoryStorage(),
       limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
     }),
   )
   async createUser(
-    @UploadedFile() file: Express.Multer.File,
+    @UploadedFiles() files: Express.Multer.File[],
     @Body() body: CreateUserDto,
   ) {
+    const file = files?.[0];
+    if (!file) {
+      throw new BadRequestException('No file uploaded');
+    }
     return this.usersService.create(body, file);
   }
 
@@ -160,10 +188,7 @@ export class UsersController {
       resumeUrl?: string;
     },
   ) {
-    if (
-      process.env.NODE_ENV === 'production' ||
-      process.env.DEV_BYPASS_OTP !== 'true'
-    ) {
+    if (process.env.DEV_BYPASS_OTP !== 'true') {
       throw new UnauthorizedException('Dev bypass not enabled or allowed');
     }
     return this.usersService.devCreateTestUser(payload);

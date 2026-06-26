@@ -1,0 +1,17 @@
+THOTA TEST CANDIDATE
+Frontend Developer
+test.candidate@example.com
++919999999999
+
+SUMMARY
+Frontend developer with experience building responsive web applications.
+
+SKILLS
+HTML, CSS, JavaScript, React, TypeScript, Git
+
+EXPERIENCE
+Frontend Developer Intern | Test Company | 2025 - Present
+Built responsive user interfaces and integrated REST APIs.
+
+EDUCATION
+Bachelor of Computer Applications | Test University | 2025

@@ -2,6 +2,14 @@ import { useMemo, useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import api from "../api/api";
 
+
+const logError = (msg: string, error: any) => {
+  console.error(msg, error instanceof Error ? error.message : String(error));
+  if (import.meta.env.MODE === "development") {
+    console.debug(`[DevOnly] Full error for: ${msg}`, error);
+  }
+};
+
 type LoggedInUser = {
   firstName?: string;
   lastName?: string;
@@ -75,6 +83,9 @@ export default function Settings() {
   const [otpSent, setOtpSent] = useState(false);
   const [otpVerified, setOtpVerified] = useState(false);
   const [otp, setOtp] = useState("");
+  const [emailOtpSent, setEmailOtpSent] = useState(false);
+  const [emailOtpVerified, setEmailOtpVerified] = useState(false);
+  const [emailOtp, setEmailOtp] = useState("");
 
   const [skills, setSkills] = useState<string[]>(initialSkills);
   const [skillDraft, setSkillDraft] = useState("");
@@ -94,6 +105,8 @@ export default function Settings() {
     year: "",
   });
 
+  const [resumeUrl, setResumeUrl] = useState<string | null>(null);
+
   // --- REUSABLE FETCH FUNCTION ---
   const loadProfileData = async () => {
     try {
@@ -101,10 +114,27 @@ export default function Settings() {
       const realData = response.data;
       const parsed = realData.resumeParsed || {};
 
-      const latestRole =
+      let latestRole =
         parsed.experience && parsed.experience.length > 0
           ? parsed.experience[0].role
           : "";
+      if (latestRole && latestRole.length > 80) {
+        latestRole = "";
+      }
+
+      let expYears = parsed.experience_years?.toString() || "";
+      if (!expYears && parsed.experience && parsed.experience.length > 0) {
+        let totalYears = 0;
+        parsed.experience.forEach((exp: any) => {
+          if (exp.duration) {
+            const num = parseFloat(exp.duration.replace(/[^0-9.]/g, ''));
+            if (!isNaN(num)) totalYears += num;
+          }
+        });
+        if (totalYears > 0) {
+          expYears = totalYears.toString();
+        }
+      }
 
       setProfile((prev) => ({
         ...prev,
@@ -112,10 +142,14 @@ export default function Settings() {
         lastName: realData.lastName || prev.lastName,
         headline: parsed.current_role || latestRole || "",
         location: parsed.location || "",
-        experience: parsed.experience ? `${parsed.experience.length} Roles` : "",
+        experience: expYears ? `${expYears} Years` : "",
         industry: parsed.industry || "",
-        summary: parsed.objective || "",
+        summary: parsed.objective || parsed.summary || "",
       }));
+
+      // In case we got an S3 url initially, the backend will return a signed url or null.
+      // We will actually just use the candidateId/resume endpoint with our JWT token later.
+      setResumeUrl(realData.id || null); // Save candidate ID instead to fetch securely later
 
       setContact((prev) => ({
         ...prev,
@@ -153,12 +187,38 @@ export default function Settings() {
       setVisibility(parsed.visibility !== undefined ? parsed.visibility : true);
       setSearchable(parsed.searchable !== undefined ? parsed.searchable : true);
     } catch (error) {
-      console.error("Failed to load real profile data", error);
+      logError("Failed to load real profile data", error);
     }
   };
 
   useEffect(() => {
-    loadProfileData();
+    const params = new URLSearchParams(window.location.search);
+    const code = params.get("code");
+
+    const exchangeAndLoad = async (exchangeCode: string) => {
+      try {
+        const res = await api.post("/auth/exchange", { code: exchangeCode });
+        const accessToken = res?.data?.accessToken;
+        const exchangedUser = res?.data?.user;
+
+        if (accessToken && exchangedUser) {
+          localStorage.setItem("authToken", accessToken);
+          localStorage.setItem("loggedInUser", JSON.stringify(exchangedUser));
+          
+          window.history.replaceState({}, document.title, window.location.pathname);
+          loadProfileData();
+        }
+      } catch (err: unknown) {
+        logError("Auth exchange failed", err);
+        navigate("/");
+      }
+    };
+
+    if (code) {
+      exchangeAndLoad(code);
+    } else {
+      loadProfileData();
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -169,10 +229,26 @@ export default function Settings() {
     const file = event.target.files?.[0];
     if (!file) return;
 
+    if (
+      ![
+        "application/pdf",
+        "application/msword",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      ].includes(file.type)
+    ) {
+      setMessage("error", "Please upload PDF, DOC, or DOCX files only.");
+      return;
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      setMessage("error", "File size must be less than 5MB.");
+      return;
+    }
+
     setMessage("info", "Uploading and parsing your new resume...");
 
     const formData = new FormData();
-    formData.append("resume", file);
+    formData.append("file", file);
 
     try {
       await api.post("/users/upload", formData, {
@@ -182,7 +258,7 @@ export default function Settings() {
       setMessage("success", "Resume parsed! Profile updated.");
       loadProfileData();
     } catch (error) {
-      console.error("Upload failed", error);
+      logError("Upload failed", error);
       setMessage("error", "Failed to upload resume. Try again.");
     }
 
@@ -198,6 +274,10 @@ export default function Settings() {
 
   // --- PROFILE LOGIC ---
   const handleProfileSave = async () => {
+    if (profile.firstName.trim().length < 2 || profile.lastName.trim().length < 2) {
+      setMessage("error", "First Name and Last Name must be at least 2 characters.");
+      return;
+    }
     try {
       await api.post("/users/update-profile", {
         firstName: profile.firstName,
@@ -211,7 +291,7 @@ export default function Settings() {
       setMessage("success", "Profile details updated securely in database.");
       loadProfileData();
     } catch (error) {
-      console.error("Failed to save profile", error);
+      logError("Failed to save profile", error);
       setMessage("error", "Failed to save profile. Please try again.");
     }
   };
@@ -229,7 +309,7 @@ export default function Settings() {
       setVisibility(nextVal);
       setMessage("success", `Profile visibility set to ${nextVal ? "Public" : "Private"}.`);
     } catch (error) {
-      console.error("Failed to update visibility", error);
+      logError("Failed to update visibility", error);
       setMessage("error", "Failed to update profile visibility.");
     } finally {
       setSavingVisibility(false);
@@ -244,7 +324,7 @@ export default function Settings() {
       setSearchable(nextVal);
       setMessage("success", `Matchmaking ${nextVal ? "Enabled" : "Disabled"}.`);
     } catch (error) {
-      console.error("Failed to update matchmaking setting", error);
+      logError("Failed to update matchmaking setting", error);
       setMessage("error", "Failed to update matchmaking settings.");
     } finally {
       setSavingSearchable(false);
@@ -252,9 +332,41 @@ export default function Settings() {
   };
 
   // --- CONTACT LOGIC ---
-  const handleEmailSave = async () => {
+  const handleSendEmailOtp = async () => {
     if (!emailDraft.includes("@")) {
       setMessage("error", "Enter a valid email address.");
+      return;
+    }
+    try {
+      await api.post("/users/send-email-otp", { email: emailDraft });
+      setEmailOtpSent(true);
+      setEmailOtpVerified(false);
+      setEmailOtp("");
+      setMessage("success", "OTP sent. Please check your email inbox.");
+    } catch (error) {
+      logError("Email OTP Error:", error);
+      setMessage("error", "Failed to send OTP.");
+    }
+  };
+
+  const handleVerifyEmailOtp = async () => {
+    if (emailOtp.trim().length < 4) {
+      setMessage("error", "Enter the 4 digit OTP.");
+      return;
+    }
+    try {
+      await api.post("/users/verify-email-otp", { email: emailDraft, otp: emailOtp });
+      setEmailOtpVerified(true);
+      setMessage("success", "Email address verified.");
+    } catch (error) {
+      logError("Verify Email Error:", error);
+      setMessage("error", "Invalid OTP code. Try again.");
+    }
+  };
+
+  const handleUpdateEmail = async () => {
+    if (!emailOtpVerified) {
+      setMessage("error", "Please verify OTP before updating.");
       return;
     }
     try {
@@ -263,10 +375,13 @@ export default function Settings() {
         email: emailDraft,
       });
       setContact((prev) => ({ ...prev, email: emailDraft }));
+      setEmailOtpSent(false);
+      setEmailOtpVerified(false);
+      setEmailOtp("");
       setMessage("success", "Email updated successfully.");
       loadProfileData();
     } catch (error) {
-      console.error("Failed to update email", error);
+      logError("Failed to update email", error);
       setMessage("error", "Failed to update email.");
     }
   };
@@ -282,9 +397,9 @@ export default function Settings() {
       setOtpSent(true);
       setOtpVerified(false);
       setOtp("");
-      setMessage("info", "OTP sent! Check your backend terminal for the code.");
+      setMessage("success", "OTP sent. Please check your email or device.");
     } catch (error) {
-      console.error("OTP Error:", error);
+      logError("OTP Error:", error);
       setMessage("error", "Failed to send OTP. Is the backend running?");
     }
   };
@@ -300,7 +415,7 @@ export default function Settings() {
       setOtpVerified(true);
       setMessage("success", "Mobile number verified.");
     } catch (error) {
-      console.error("Verify Error:", error);
+      logError("Verify Error:", error);
       setMessage("error", "Invalid OTP code. Try again.");
     }
   };
@@ -324,7 +439,7 @@ export default function Settings() {
       setMessage("success", "Mobile number updated securely in database.");
       loadProfileData();
     } catch (error) {
-      console.error("Update Error:", error);
+      logError("Update Error:", error);
       setMessage("error", "Failed to save new mobile number.");
     }
   };
@@ -351,7 +466,7 @@ export default function Settings() {
       setMessage("success", "Skill added and saved.");
       loadProfileData();
     } catch (error) {
-      console.error("Failed to save skill", error);
+      logError("Failed to save skill", error);
       setMessage("error", "Skill added locally, but failed to save to server.");
     }
   };
@@ -368,7 +483,7 @@ export default function Settings() {
       setMessage("success", "Skill removed.");
       loadProfileData();
     } catch (error) {
-      console.error("Failed to remove skill", error);
+      logError("Failed to remove skill", error);
       setMessage("error", "Failed to sync deletion with server.");
     }
   };
@@ -392,7 +507,7 @@ export default function Settings() {
       setMessage("success", "Education added and saved.");
       loadProfileData();
     } catch (error) {
-      console.error("Failed to save education", error);
+      logError("Failed to save education", error);
       setMessage("error", "Failed to sync education with server.");
     }
   };
@@ -409,7 +524,7 @@ export default function Settings() {
       setMessage("success", "Education entry removed.");
       loadProfileData();
     } catch (error) {
-      console.error("Failed to remove education", error);
+      logError("Failed to remove education", error);
       setMessage("error", "Failed to sync deletion with server.");
     }
   };
@@ -502,25 +617,23 @@ export default function Settings() {
             <div className="inline-flex py-1 px-3 rounded bg-primary-container/10 text-primary-container text-[10px] font-bold tracking-[0.2em] uppercase mb-2">
               Settings
             </div>
-            <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-              <div className="flex-1">
-                <div className="flex flex-col md:flex-row md:items-baseline md:justify-between gap-4">
-                  <div>
-                    <h1 className="text-2xl font-space font-bold text-on-surface">My Profile Settings</h1>
-                    <p className="text-sm text-on-surface_variant font-light mt-1">
-                      Manage your profile details, contact information, and skills.
-                    </p>
-                  </div>
+            <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+              <div className="flex-1 pr-4">
+                <div>
+                  <h1 className="text-2xl font-space font-bold text-on-surface">My Profile Settings</h1>
+                  <p className="text-sm text-on-surface_variant font-light mt-1">
+                    Manage your profile details, contact information, and skills.
+                  </p>
                   
-                  <div className="flex flex-col items-end text-right gap-1 md:mt-0 mt-2">
-                    <div className="flex items-center gap-2 text-on-surface_variant/60">
-                      <span className="text-[10px] font-bold uppercase tracking-wider">Profile last updated</span>
+                  <div className="flex flex-wrap items-center gap-x-6 gap-y-2 mt-4">
+                    <div className="flex items-center gap-2 text-on-surface_variant/60 whitespace-nowrap">
+                      <span className="text-[10px] font-bold uppercase tracking-wider">Profile last updated:</span>
                       <span className="text-xs font-space font-bold text-on-surface">
                         {formatDate(metadata.updatedAt)}
                       </span>
                     </div>
-                    <div className="flex items-center gap-2 text-on-surface_variant/40">
-                      <span className="text-[10px] font-bold uppercase tracking-wider">Last login</span>
+                    <div className="flex items-center gap-2 text-on-surface_variant/40 whitespace-nowrap">
+                      <span className="text-[10px] font-bold uppercase tracking-wider">Last login:</span>
                       <span className="text-xs font-space font-medium">
                         {formatDate(metadata.lastLogin)}
                       </span>
@@ -531,10 +644,24 @@ export default function Settings() {
               <div className="flex flex-wrap gap-3">
                 <button
                   type="button"
-                  onClick={() => navigate("/resume")}
+                  onClick={async () => {
+                    if (!resumeUrl) {
+                      setMessage("error", "No resume uploaded yet.");
+                      return;
+                    }
+                    try {
+                      setMessage("info", "Fetching resume securely...");
+                      const response = await api.get(`/users/${resumeUrl}/resume`, { responseType: 'blob' });
+                      const blob = new Blob([response.data], { type: 'application/pdf' });
+                      const blobUrl = URL.createObjectURL(blob);
+                      window.open(blobUrl, "_blank", "noopener,noreferrer");
+                    } catch (err) {
+                      setMessage("error", "Failed to load resume.");
+                    }
+                  }}
                   className="rounded-md border border-outline-variant bg-surface-container-highest/30 px-4 py-2.5 text-xs font-bold tracking-widest uppercase text-on-surface_variant hover:bg-surface-container-highest/50 transition opacity-70 hover:opacity-100"
                 >
-                  Back to resume
+                  View Resume
                 </button>
 
                 <input
@@ -551,7 +678,19 @@ export default function Settings() {
                   className="rounded-md btn-gradient px-5 py-2.5 text-xs font-bold tracking-wide shadow-lg shadow-primary/10 active:scale-[0.98] transition-all flex items-center justify-center gap-2"
                 >
                   Upload New Resume
-                  <div className="w-2 h-2 rounded-full bg-white/40" />
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    localStorage.removeItem("authToken");
+                    localStorage.removeItem("loggedInUser");
+                    sessionStorage.clear();
+                    navigate("/", { replace: true });
+                  }}
+                  className="rounded-md border border-outline-variant bg-surface-container-highest/30 px-4 py-2.5 text-xs font-bold tracking-widest uppercase text-on-surface_variant hover:bg-red-500/10 hover:text-red-500 hover:border-red-500/30 transition opacity-70 hover:opacity-100"
+                >
+                  Sign Out
                 </button>
               </div>
             </div>
@@ -569,7 +708,7 @@ export default function Settings() {
                   { id: "profile", label: "Profile Details" },
                   { id: "contact", label: "Email & Mobile" },
                   { id: "education", label: "Education Details" },
-                  { id: "skills", label: "Skills Parsing" },
+                  { id: "skills", label: "Skills" },
                   { id: "privacy", label: "Privacy & Visibility" },
                 ].map((item) => (
                   <button
@@ -587,11 +726,6 @@ export default function Settings() {
                     }`}
                   >
                     <span>{item.label}</span>
-                    {item.id === "skills" && (
-                      <span className="rounded bg-primary/10 px-1.5 py-0.5 text-[9px] uppercase tracking-wider text-primary font-bold">
-                        Alpha
-                      </span>
-                    )}
                   </button>
                 ))}
               </nav>
@@ -616,24 +750,29 @@ export default function Settings() {
                 <div className="flex items-center justify-between text-sm">
                   <span className="text-on-surface font-semibold">Completeness</span>
                   <div className="flex items-center gap-1">
-                    <span className="text-primary font-space font-bold">78%</span>
+                    <span className="text-primary font-space font-bold">Checklist</span>
                   </div>
                 </div>
                 
-                <div className="h-2 rounded-full bg-surface-container-highest/50 overflow-hidden p-[1px] border border-outline-variant/30">
-                  <div 
-                    className="h-full rounded-full bg-gradient-to-r from-primary/80 to-primary shadow-[0_0_12px_rgba(0,108,73,0.4)] transition-all duration-1000 ease-out" 
-                    style={{ width: '78%' }}
-                  />
-                </div>
-                
-                <div className="flex items-start gap-1.5 mt-2">
-                  <svg className="w-3.5 h-3.5 text-primary mt-0.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
-                  <p className="text-[11px] text-on-surface_variant/80 font-light leading-relaxed">
-                    Add more details to increase visibility and unlock matchmaking options.
-                  </p>
+                <div className="flex flex-col gap-1.5 mt-2 text-[11px] font-medium">
+                  <button onClick={() => setActiveTab('profile')} className={`text-left flex items-center gap-2 ${profile.firstName && profile.lastName ? 'text-primary' : 'text-on-surface_variant hover:text-primary'}`}>
+                    {profile.firstName && profile.lastName ? '✅' : '❌'} Name {(!profile.firstName || !profile.lastName) && '← click to fill'}
+                  </button>
+                  <button onClick={() => setActiveTab('contact')} className={`text-left flex items-center gap-2 ${contact.email ? 'text-primary' : 'text-on-surface_variant hover:text-primary'}`}>
+                    {contact.email ? '✅' : '❌'} Email {!contact.email && '← click to fill'}
+                  </button>
+                  <button onClick={() => setActiveTab('contact')} className={`text-left flex items-center gap-2 ${contact.mobile ? 'text-primary' : 'text-on-surface_variant hover:text-primary'}`}>
+                    {contact.mobile ? '✅' : '❌'} Mobile {!contact.mobile && '← click to fill'}
+                  </button>
+                  <button onClick={() => setActiveTab('profile')} className={`text-left flex items-center gap-2 ${profile.location ? 'text-primary' : 'text-on-surface_variant hover:text-primary'}`}>
+                    {profile.location ? '✅' : '❌'} Location {!profile.location && '← click to fill'}
+                  </button>
+                  <button onClick={() => setActiveTab('profile')} className={`text-left flex items-center gap-2 ${profile.industry ? 'text-primary' : 'text-on-surface_variant hover:text-primary'}`}>
+                    {profile.industry ? '✅' : '❌'} Industry {!profile.industry && '← click to fill'}
+                  </button>
+                  <button onClick={() => setActiveTab('education')} className={`text-left flex items-center gap-2 ${education.length > 0 ? 'text-primary' : 'text-on-surface_variant hover:text-primary'}`}>
+                    {education.length > 0 ? '✅' : '❌'} Education {education.length === 0 && '← click to fill'}
+                  </button>
                 </div>
               </div>
             </div>
@@ -692,9 +831,10 @@ export default function Settings() {
                     />
                   </div>
                   <div className="space-y-1.5">
-                    <label className="text-[10px] font-bold uppercase tracking-widest text-on-surface_variant/60">Location</label>
+                    <label className="text-[10px] font-bold uppercase tracking-widest text-on-surface_variant/60">Location <span className="text-red-500">*</span></label>
                     <input
                       value={profile.location}
+                      placeholder="e.g. Hyderabad, Telangana"
                       onChange={(e) =>
                         setProfile((prev) => ({
                           ...prev,
@@ -708,6 +848,7 @@ export default function Settings() {
                     <label className="text-[10px] font-bold uppercase tracking-widest text-on-surface_variant/60">Years of Experience</label>
                     <input
                       value={profile.experience}
+                      placeholder="e.g. 2 Years"
                       onChange={(e) =>
                         setProfile((prev) => ({
                           ...prev,
@@ -718,9 +859,10 @@ export default function Settings() {
                     />
                   </div>
                   <div className="space-y-1.5">
-                    <label className="text-[10px] font-bold uppercase tracking-widest text-on-surface_variant/60">Industry</label>
+                    <label className="text-[10px] font-bold uppercase tracking-widest text-on-surface_variant/60">Industry <span className="text-red-500">*</span></label>
                     <input
                       value={profile.industry}
+                      placeholder="e.g. Cybersecurity, Information Technology"
                       onChange={(e) =>
                         setProfile((prev) => ({
                           ...prev,
@@ -731,17 +873,21 @@ export default function Settings() {
                     />
                   </div>
                   <div className="space-y-1.5 md:col-span-2">
-                    <label className="text-[10px] font-bold uppercase tracking-widest text-on-surface_variant/60">Professional Summary</label>
+                    <div className="flex justify-between items-end">
+                      <label className="text-[10px] font-bold uppercase tracking-widest text-on-surface_variant/60">Professional Summary</label>
+                      <span className="text-[10px] text-on-surface_variant/60">{profile.summary.length} / 600</span>
+                    </div>
                     <textarea
-                      rows={4}
                       value={profile.summary}
+                      maxLength={600}
                       onChange={(e) =>
                         setProfile((prev) => ({
                           ...prev,
                           summary: e.target.value,
                         }))
                       }
-                      className="w-full rounded-md bg-surface-container-low px-4 py-3 text-sm text-on-surface placeholder:text-on-surface_variant/30 outline-none transition-all duration-300 border-2 border-transparent focus:border-primary-container focus:bg-surface-bright focus:ring-4 focus:ring-primary-container/10 resize-none"
+                      className="w-full rounded-md bg-surface-container-low px-4 py-3 text-sm text-on-surface placeholder:text-on-surface_variant/30 outline-none transition-all duration-300 border-2 border-transparent focus:border-primary-container focus:bg-surface-bright focus:ring-4 focus:ring-primary-container/10 min-h-[100px]"
+                      style={{ fieldSizing: "content" } as React.CSSProperties}
                     />
                   </div>
                 </div>
@@ -787,13 +933,22 @@ export default function Settings() {
                         Active: {contact.email}
                       </p>
                     </div>
-                    <button
-                      type="button"
-                      onClick={handleEmailSave}
-                      className="rounded-md border border-outline-variant bg-surface-container-highest/30 px-5 py-2.5 text-xs font-bold tracking-widest uppercase text-on-surface_variant hover:bg-surface-container-highest/50 transition opacity-80 hover:opacity-100"
-                    >
-                      Update Email
-                    </button>
+                    <div className="flex flex-wrap gap-3">
+                      <button
+                        type="button"
+                        onClick={handleSendEmailOtp}
+                        className="rounded-md border border-outline-variant bg-surface-container-highest/30 px-5 py-2.5 text-xs font-bold tracking-widest uppercase text-on-surface_variant hover:bg-surface-container-highest/50 transition opacity-80 hover:opacity-100"
+                      >
+                        Send OTP
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleUpdateEmail}
+                        className="rounded-md btn-gradient px-5 py-2.5 text-xs font-bold tracking-wide shadow-sm active:scale-[0.98] transition-all"
+                      >
+                        Update Email
+                      </button>
+                    </div>
                   </div>
 
                   <div className="space-y-4">
@@ -847,6 +1002,34 @@ export default function Settings() {
                         Verify
                       </button>
                       {otpVerified && (
+                        <span className="text-[10px] font-bold uppercase tracking-widest text-primary flex items-center gap-2 py-3">
+                          <div className="w-1.5 h-1.5 rounded-full bg-primary" /> Verified
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {emailOtpSent && (
+                  <div className="mt-4 rounded-xl border border-primary/20 bg-primary/5 p-6 relative z-10 animate-in fade-in">
+                    <div className="flex flex-col gap-3 md:flex-row md:items-end md:gap-4">
+                      <div className="flex-1 space-y-1.5">
+                        <label className="text-[10px] font-bold uppercase tracking-widest text-primary/80">Enter 4-Digit Email OTP</label>
+                        <input
+                          value={emailOtp}
+                          onChange={(e) => setEmailOtp(e.target.value)}
+                          className="w-full rounded-md bg-surface-bright px-4 py-3 text-sm text-on-surface placeholder:text-on-surface_variant/30 outline-none transition-all duration-300 border-2 border-primary/30 focus:border-primary-container focus:ring-4 focus:ring-primary-container/10 font-mono tracking-widest"
+                          placeholder="0 0 0 0"
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleVerifyEmailOtp}
+                        className="rounded-md border border-primary/30 bg-primary/10 text-primary px-6 py-3 text-xs font-bold uppercase tracking-widest hover:bg-primary/20 transition-all"
+                      >
+                        Verify
+                      </button>
+                      {emailOtpVerified && (
                         <span className="text-[10px] font-bold uppercase tracking-widest text-primary flex items-center gap-2 py-3">
                           <div className="w-1.5 h-1.5 rounded-full bg-primary" /> Verified
                         </span>
@@ -1020,15 +1203,15 @@ export default function Settings() {
                       type="button"
                       onClick={handleVisibilityToggle}
                       disabled={savingVisibility}
-                      className={`rounded px-4 py-1.5 text-[10px] font-bold uppercase tracking-widest transition-all ${
-                        savingVisibility
-                          ? "bg-surface-container-highest border border-outline-variant text-on-surface_variant opacity-50 cursor-not-allowed"
-                          : visibility
-                          ? "bg-primary/20 text-primary border border-primary/30 shadow-[0_0_15px_rgba(0,108,73,0.1)] hover:bg-primary/30"
-                          : "bg-surface-container-highest border border-outline-variant text-on-surface_variant opacity-70 hover:opacity-100"
+                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                        visibility ? 'bg-primary' : 'bg-surface-container-highest'
                       }`}
                     >
-                      {savingVisibility ? "Saving..." : visibility ? "Public" : "Private"}
+                      <span
+                        className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                          visibility ? 'translate-x-6' : 'translate-x-1'
+                        }`}
+                      />
                     </button>
                   </div>
                   <div className="flex items-center justify-between rounded-xl border border-outline-variant bg-surface-container-low px-5 py-4 transition-all hover:bg-surface-container-high">
@@ -1042,15 +1225,15 @@ export default function Settings() {
                       type="button"
                       onClick={handleSearchableToggle}
                       disabled={savingSearchable}
-                      className={`rounded px-4 py-1.5 text-[10px] font-bold uppercase tracking-widest transition-all ${
-                        savingSearchable
-                          ? "bg-surface-container-highest border border-outline-variant text-on-surface_variant opacity-50 cursor-not-allowed"
-                          : searchable
-                          ? "bg-primary/20 text-primary border border-primary/30 shadow-[0_0_15px_rgba(0,108,73,0.1)] hover:bg-primary/30"
-                          : "bg-surface-container-highest border border-outline-variant text-on-surface_variant opacity-70 hover:opacity-100"
+                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                        searchable ? 'bg-primary' : 'bg-surface-container-highest'
                       }`}
                     >
-                      {savingSearchable ? "Saving..." : searchable ? "Enabled" : "Disabled"}
+                      <span
+                        className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                          searchable ? 'translate-x-6' : 'translate-x-1'
+                        }`}
+                      />
                     </button>
                   </div>
                 </div>

@@ -1,14 +1,14 @@
 import {
   Controller,
   Post,
-  UploadedFile,
+  UploadedFiles,
   UseInterceptors,
   UseGuards,
   Request,
   UnauthorizedException,
   BadRequestException,
 } from '@nestjs/common';
-import { FileInterceptor } from '@nestjs/platform-express';
+import { AnyFilesInterceptor } from '@nestjs/platform-express';
 import * as multer from 'multer';
 import { UploadsService } from './uploads.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -20,7 +20,7 @@ export class UploadsController {
   @Post('resume')
   @UseGuards(JwtAuthGuard)
   @UseInterceptors(
-    FileInterceptor('file', {
+    AnyFilesInterceptor({
       storage: multer.memoryStorage(),
       limits: {
         fileSize: 10 * 1024 * 1024, // 10 MB limit
@@ -41,9 +41,10 @@ export class UploadsController {
     }),
   )
   uploadResume(
-    @UploadedFile() file: Express.Multer.File,
+    @UploadedFiles() files: Express.Multer.File[],
     @Request() req: { user: { id?: string; sub?: string } },
   ) {
+    const file = files?.[0];
     if (!file) {
       throw new BadRequestException('File is required');
     }

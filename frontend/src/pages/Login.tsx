@@ -25,11 +25,11 @@ export default function Login() {
       setError("");
       setNotice("");
 
-      const response = await api.post("/users/login", { email });
+      await api.post("/auth/initiate-login", { email });
 
-      localStorage.setItem("authToken", response.data.accessToken);
-      localStorage.setItem("loggedInUser", JSON.stringify(response.data.user));
-      navigate("/resume");
+      // Save email for the VerifyOtp page
+      sessionStorage.setItem("email", email);
+      navigate("/verify");
     } catch (err: unknown) {
       setError(getApiErrorMessage(err, "Login failed"));
     } finally {
@@ -50,7 +50,7 @@ export default function Login() {
 
         localStorage.setItem("authToken", response.data.accessToken);
         localStorage.setItem("loggedInUser", JSON.stringify(response.data.user));
-        navigate("/resume");
+        navigate("/settings");
       } catch (err: unknown) {
         setError(getApiErrorMessage(err, "Google login failed on backend"));
       } finally {

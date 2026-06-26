@@ -24,6 +24,9 @@ export default function Register() {
 
     try {
       const parsed = JSON.parse(draft);
+      if (typeof parsed.countryCode === "string") {
+        setCountryCode(parsed.countryCode);
+      }
       setForm({
         ...initialForm,
         ...parsed,
@@ -54,7 +57,10 @@ export default function Register() {
       setError("");
       await api.post("/auth/initiate", payload);
       sessionStorage.setItem("email", form.email);
-      sessionStorage.setItem("registerDraft", JSON.stringify(form));
+      sessionStorage.setItem(
+        "registerDraft",
+        JSON.stringify({ ...form, countryCode })
+      );
       navigate("/verify");
     } catch (err: unknown) {
       setError(getApiErrorMessage(err, "Unable to complete registration. Please try again."));
@@ -66,7 +72,10 @@ export default function Register() {
   const handleChange = (key: keyof typeof form, value: string) => {
     setForm((prev) => {
       const updated = { ...prev, [key]: value };
-      sessionStorage.setItem("registerDraft", JSON.stringify(updated));
+      sessionStorage.setItem(
+        "registerDraft",
+        JSON.stringify({ ...updated, countryCode })
+      );
       return updated;
     });
   };
@@ -158,7 +167,14 @@ export default function Register() {
               <div className="flex items-center gap-0 rounded-md bg-surface-container-low border-2 border-transparent focus-within:border-primary-container focus-within:bg-surface-bright focus-within:ring-4 focus-within:ring-primary-container/10 transition-all duration-300 overflow-hidden">
                 <select
                   value={countryCode}
-                  onChange={(e) => setCountryCode(e.target.value)}
+                  onChange={(e) => {
+                    const next = e.target.value;
+                    setCountryCode(next);
+                    sessionStorage.setItem(
+                      "registerDraft",
+                      JSON.stringify({ ...form, countryCode: next })
+                    );
+                  }}
                   className="px-3 py-2.5 text-sm text-on-surface font-semibold bg-surface-container-high border-none outline-none cursor-pointer focus:bg-surface-bright"
                 >
                   <option value="+91">+91 (IN)</option>

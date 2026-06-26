@@ -10,7 +10,7 @@ import {
   ForbiddenException,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
-import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { ServiceOrJwtAuthGuard } from '../auth/service-or-jwt-auth.guard';
 import { MatchJdDto } from './dto/match-jd.dto';
 import { MatchService } from './match.service';
 
@@ -18,9 +18,17 @@ import { MatchService } from './match.service';
 export class MatchController {
   constructor(private readonly matchService: MatchService) {}
 
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(ServiceOrJwtAuthGuard)
   @Post('jd')
-  matchJd(@Body() body: MatchJdDto) {
+  matchJd(
+    @Body() body: MatchJdDto,
+    @Req() req: { user: { role?: string } },
+  ) {
+    const isPrivileged =
+      req.user?.role === 'admin' || req.user?.role === 'recruiter';
+    if (!isPrivileged) {
+      throw new ForbiddenException('Insufficient permissions');
+    }
     return this.matchService.matchByJd(body);
   }
 
@@ -53,7 +61,7 @@ export class MatchController {
 
   // NEW: endpoint for Recruiting backend to create matches in DB
   // POST http://candidate-portal:3000/match/jd/save?jobDescriptionId=...
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(ServiceOrJwtAuthGuard)
   @Post('jd/save')
   async saveMatchesForJob(
     @Query('jobDescriptionId') jobDescriptionId: string,

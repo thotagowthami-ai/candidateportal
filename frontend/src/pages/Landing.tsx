@@ -309,7 +309,7 @@ const Landing = () => {
 
       {/* Footer */}
       <footer className="bg-surface border-t border-outline-variant py-12">
-        <div className="max-w-7xl mx-auto px-6 flex flex-col md:row items-center justify-between gap-8">
+        <div className="max-w-7xl mx-auto px-6 flex flex-col md:flex-row items-center justify-between gap-8">
           <div>
             <div className="text-lg font-space font-bold text-on-surface mb-2">Candidate Portal</div>
             <p className="text-xs text-on-surface_variant opacity-50">© 2024 CANDIDATE PORTAL. YOUR CAREER PARTNER.</p>

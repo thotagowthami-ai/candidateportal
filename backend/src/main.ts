@@ -59,6 +59,15 @@ async function bootstrap() {
         return;
       }
 
+      // Match Vercel preview subdomains dynamically
+      if (
+        origin.startsWith('https://candidateportal-') &&
+        origin.endsWith('.vercel.app')
+      ) {
+        callback(null, true);
+        return;
+      }
+
       // Explicit flag for 'null' origin
       if (origin === 'null' && trustNullOrigin) {
         callback(null, true);

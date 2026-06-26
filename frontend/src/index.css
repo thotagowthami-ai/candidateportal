@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600;700&display=swap');
+@import 'https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600;700&display=swap';
 
 @tailwind base;
 @tailwind components;
@@ -33,19 +33,19 @@
   }
 
   .fade-in {
-    animation-name: fadeIn;
+    animation-name: fade-in;
   }
 
   .slide-in-from-bottom {
-    animation-name: slideInFromBottom;
+    animation-name: slide-in-from-bottom;
   }
 
-  @keyframes fadeIn {
+  @keyframes fade-in {
     from { opacity: 0; }
     to { opacity: 1; }
   }
 
-  @keyframes slideInFromBottom {
+  @keyframes slide-in-from-bottom {
     from { transform: translateY(1.5rem); opacity: 0; }
     to { transform: translateY(0); opacity: 1; }
   }

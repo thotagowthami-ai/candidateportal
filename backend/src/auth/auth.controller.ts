@@ -28,6 +28,12 @@ export class AuthController {
     return this.authService.initiate(dto);
   }
 
+  // ✅ Initiate login + send OTP
+  @Post('initiate-login')
+  initiateLogin(@Body() dto: { email: string }) {
+    return this.authService.initiateLogin(dto.email);
+  }
+
   // ✅ Send OTP manually (optional)
   @Post('send-otp')
   sendOtp(@Body() dto: ResendOtpDto) {
@@ -91,7 +97,7 @@ export class AuthController {
       );
       const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
 
-      const redirectUrl = new URL(`${frontendUrl}/resume`);
+      const redirectUrl = new URL(`${frontendUrl}/settings`);
       redirectUrl.searchParams.set('code', code);
 
       return res.redirect(redirectUrl.toString());

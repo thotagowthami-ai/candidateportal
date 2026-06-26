@@ -63,7 +63,12 @@ export class SmsController {
 
     const userPhone = dbResult.rows[0]?.phone;
     const isPhoneVerified = dbResult.rows[0]?.phone_verified;
-    if (!userPhone || userPhone !== body.phone || !isPhoneVerified) {
+
+    const cleanPhone = (p: string) => p?.replace(/\D/g, '') || '';
+    const cleanUser = cleanPhone(userPhone);
+    const cleanBody = cleanPhone(body.phone);
+
+    if (!cleanUser || cleanUser !== cleanBody || !isPhoneVerified) {
       throw new HttpException(
         'Forbidden: Destination phone number does not match caller verified phone number',
         HttpStatus.FORBIDDEN,
