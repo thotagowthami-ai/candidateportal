@@ -34,12 +34,12 @@ test.describe('deployed smoke', () => {
     await page.goto('/', { waitUntil: 'networkidle' });
 
     const hrefs = await page
-      .locator('a[href^="/"], a[href^="http"]')
+      .locator('a[href^="/"]')
       .evaluateAll((links) =>
         Array.from(new Set(
           links
             .map((link) => (link as HTMLAnchorElement).href)
-            .filter((href) => href && !href.includes('#')),
+            .filter((href) => href && !href.includes('#') && href.startsWith(window.location.origin)),
         )).slice(0, 12),
       );
 
@@ -82,8 +82,8 @@ test.describe('deployed smoke', () => {
       const response = await request.get(new URL(path, apiURL).toString());
       statuses.push(`${path}: ${response.status()}`);
 
-      if (response.status() < 500) {
-        expect(response.status()).toBeLessThan(500);
+      if (response.status() >= 200 && response.status() < 400) {
+        expect(response.status()).toBeLessThan(400);
         return;
       }
     }

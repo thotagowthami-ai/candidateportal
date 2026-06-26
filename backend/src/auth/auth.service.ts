@@ -67,14 +67,16 @@ export class AuthService {
     // Store in TokenStore with 5 minute TTL
     await this.tokenStore.set(`otp:${normalizedEmail}`, { otp, data }, 5 * 60);
 
-    this.logger.log(`🔑 [TESTING] Generated OTP for ${normalizedEmail}: ${otp}`);
+    if (process.env.DEV_BYPASS_OTP === 'true') {
+      this.logger.warn(`DEV_BYPASS_OTP enabled; OTP for ${normalizedEmail}: ${otp}`);
+    }
     this.logger.log('Sending OTP to candidate');
 
     try {
       await this.resend.emails.send({
         from: process.env.EMAIL_FROM!,
         to: normalizedEmail,
-        subject: `Verification Code: ${otp} - Candidate Portal`,
+        subject: 'Verification Code - Candidate Portal',
         html: `
           <h2>Email Verification</h2>
           <h1>${otp}</h1>
@@ -86,16 +88,22 @@ export class AuthService {
       if (data?.phone) {
         const phone = data.phone.trim();
         const smsMessage = `Your RecruitApp verification code is: ${otp}. Valid for 5 minutes.`;
-        const smsResult = await this.smsService.sendCandidateSMS(
-          phone,
-          smsMessage,
-        );
-        if (!smsResult.success) {
-          this.logger.warn(
-            `Failed to send OTP SMS to ${phone}: ${smsResult.error || 'Unknown error'}. Registration proceeding via Email OTP.`,
+        try {
+          const smsResult = await this.smsService.sendCandidateSMS(
+            phone,
+            smsMessage,
           );
-        } else {
-          this.logger.log('SMS OTP sent successfully');
+          if (!smsResult.success) {
+            this.logger.warn(
+              `Failed to send OTP SMS to ${phone}: ${smsResult.error || 'Unknown error'}. Registration proceeding via Email OTP.`,
+            );
+          } else {
+            this.logger.log('SMS OTP sent successfully');
+          }
+        } catch (smsError: any) {
+          this.logger.warn(
+            `Exception while sending OTP SMS to ${phone}: ${smsError?.message || 'Unknown error'}. Registration proceeding via Email OTP.`,
+          );
         }
       }
     } catch (error: any) {

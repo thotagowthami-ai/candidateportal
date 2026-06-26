@@ -11,6 +11,7 @@ import type { Response } from 'express';
 import { AuthGuard } from '@nestjs/passport';
 import { AuthService } from './auth.service';
 import { InitiateRegistrationDto } from './dto/initiate-registration.dto';
+import { InitiateLoginDto } from './dto/initiate-login.dto';
 import { ResendOtpDto } from './dto/resend-otp.dto';
 import { VerifyOtpDto } from './dto/verify-otp.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
@@ -30,7 +31,7 @@ export class AuthController {
 
   // ✅ Initiate login + send OTP
   @Post('initiate-login')
-  initiateLogin(@Body() dto: { email: string }) {
+  initiateLogin(@Body() dto: InitiateLoginDto) {
     return this.authService.initiateLogin(dto.email);
   }
 

@@ -652,9 +652,11 @@ export default function Settings() {
                     try {
                       setMessage("info", "Fetching resume securely...");
                       const response = await api.get(`/users/${resumeUrl}/resume`, { responseType: 'blob' });
-                      const blob = new Blob([response.data], { type: 'application/pdf' });
+                      const type = response.headers?.['content-type'] || 'application/pdf';
+                      const blob = new Blob([response.data], { type });
                       const blobUrl = URL.createObjectURL(blob);
                       window.open(blobUrl, "_blank", "noopener,noreferrer");
+                      setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
                     } catch (err) {
                       setMessage("error", "Failed to load resume.");
                     }

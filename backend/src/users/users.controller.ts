@@ -131,7 +131,7 @@ export class UsersController {
     if (!targetEmail) {
       throw new BadRequestException('Email is required.');
     }
-    return this.usersService.verifyEmailOtp(targetEmail, body.otp);
+    return this.usersService.verifyEmailOtp(req.user.email, targetEmail, body.otp);
   }
 
   // --- NEW: REPLACE EXISTING RESUME ROUTE ---
@@ -140,7 +140,7 @@ export class UsersController {
   @UseInterceptors(
     AnyFilesInterceptor({
       storage: multer.memoryStorage(),
-      limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
+      limits: { fileSize: 5 * 1024 * 1024, files: 1 }, // 5MB, one file
     }),
   )
   async replaceResume(
@@ -161,7 +161,7 @@ export class UsersController {
   @UseInterceptors(
     AnyFilesInterceptor({
       storage: multer.memoryStorage(),
-      limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
+      limits: { fileSize: 5 * 1024 * 1024, files: 1 }, // 5MB, one file
     }),
   )
   async createUser(
@@ -188,7 +188,10 @@ export class UsersController {
       resumeUrl?: string;
     },
   ) {
-    if (process.env.DEV_BYPASS_OTP !== 'true') {
+    if (
+      process.env.NODE_ENV === 'production' ||
+      process.env.DEV_BYPASS_OTP !== 'true'
+    ) {
       throw new UnauthorizedException('Dev bypass not enabled or allowed');
     }
     return this.usersService.devCreateTestUser(payload);

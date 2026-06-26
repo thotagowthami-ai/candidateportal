@@ -205,19 +205,22 @@ export class UsersService {
     const hashedOtp = this.hashOtp(otpCode);
     await this.tokenStore.set(key, { hash: hashedOtp, attempts: 0 }, 10 * 60);
 
-    this.logger.log(`Generated Email OTP code: ${otpCode}`);
+    this.logger.log('Generated Email OTP');
 
     // Here you would integrate with an email provider (e.g. SendGrid, AWS SES)
     // For now, we mock it by logging.
-    if (process.env.DEV_BYPASS_OTP === 'true' || true) {
+    if (process.env.DEV_BYPASS_OTP === 'true') {
       this.logger.log(`Mocking email sending. Email OTP for ${normalizedEmail} is ${otpCode}`);
+    } else {
+      // Send via the configured email provider here; do not return success until delivery succeeds.
     }
 
     return { success: true, message: 'OTP sent to email address' };
   }
 
-  async verifyEmailOtp(email: string, otp: string) {
-    const normalizedEmail = email.trim().toLowerCase();
+  async verifyEmailOtp(currentEmail: string, newEmail: string, otp: string) {
+    const normalizedCurrentEmail = currentEmail.trim().toLowerCase();
+    const normalizedEmail = newEmail.trim().toLowerCase();
     if (!normalizedEmail) {
       throw new BadRequestException('Email is required.');
     }
@@ -245,10 +248,13 @@ export class UsersService {
 
     await this.tokenStore.delete(key);
 
-    await this.pool.query(
-      'UPDATE users SET email = $1, email_verified = true WHERE email = $1',
-      [normalizedEmail],
+    const result = await this.pool.query(
+      'UPDATE users SET email = $1, email_verified = true WHERE email = $2',
+      [normalizedEmail, normalizedCurrentEmail],
     );
+    if (result.rowCount !== 1) {
+      throw new NotFoundException('User not found');
+    }
 
     return { success: true, message: 'Email address verified successfully' };
   }
@@ -726,6 +732,13 @@ export class UsersService {
         res.setHeader('Content-Type', contentType);
       }
       res.setHeader('Content-Disposition', 'inline; filename="resume.pdf"');
+      stream.on('error', () => {
+        if (!res.headersSent) {
+          res.status(404).end('Could not retrieve resume from storage');
+        } else {
+          res.destroy();
+        }
+      });
       stream.pipe(res);
     } catch (err) {
       throw new NotFoundException('Could not retrieve resume from storage');

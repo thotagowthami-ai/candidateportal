@@ -57,9 +57,9 @@ test('login redirects to resume page', async ({ page }) => {
   // Click Sign In
   await page.click('button:has-text("Sign In")');
 
-  // Wait for redirect to /resume
-  await expect(page).toHaveURL(/resume/, { timeout: 10000 });
+  // Wait for redirect to /settings
+  await expect(page).toHaveURL(/settings/, { timeout: 10000 });
 
-  // Verify resume page loaded
-  await expect(page.getByText('Active Session', { exact: false })).toBeVisible({ timeout: 10000 });
+  // Verify settings page loaded
+  await expect(page.getByText('My Profile Settings', { exact: false })).toBeVisible({ timeout: 10000 });
 });

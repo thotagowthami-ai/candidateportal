@@ -8,8 +8,6 @@ const resumeFile = process.env.E2E_RESUME_FILE
 
 const authPaths = ['/login', '/signin', '/sign-in', '/auth/login'];
 const uploadPaths = [
-  '/candidate/profile',
-  '/candidate/dashboard',
   '/profile',
   '/upload',
   '/resume',

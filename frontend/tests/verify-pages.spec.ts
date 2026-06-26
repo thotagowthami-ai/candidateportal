@@ -10,20 +10,24 @@ const pages = [
 
 for (const pageInfo of pages) {
   test(`verify page loading: ${pageInfo.name} (${pageInfo.path})`, async ({ page }) => {
+    const consoleErrors: string[] = [];
+    
+    // 1. Optional: Verify no unhandled JavaScript/console errors occurred
+    page.on('console', msg => {
+      if (msg.type() === 'error') {
+        consoleErrors.push(msg.text());
+      }
+    });
+
     // Navigate to the page
     const response = await page.goto(pageInfo.path);
 
-    // 1. Verify HTTP response is successful (200 OK)
+    // 2. Verify HTTP response is successful (200 OK)
     expect(response?.status()).toBe(200);
 
-    // 2. Ensure page is not blank and has correct browser title loaded
+    // 3. Ensure page is not blank and has correct browser title loaded
     await expect(page).toHaveTitle(/Candidate Portal/i);
 
-    // 3. Optional: Verify no unhandled JavaScript/console errors occurred
-    page.on('console', msg => {
-      if (msg.type() === 'error') {
-        console.warn(`Console error on ${pageInfo.path}:`, msg.text());
-      }
-    });
+    expect(consoleErrors, `Console errors found on ${pageInfo.path}`).toEqual([]);
   });
 }

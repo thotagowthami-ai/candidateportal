@@ -35,19 +35,19 @@
     {
       "key": "otp",
       "value": "",
-      "type": "default",
+      "type": "secret",
       "enabled": true
     },
     {
       "key": "resetToken",
       "value": "",
-      "type": "default",
+      "type": "secret",
       "enabled": true
     },
     {
       "key": "exchangeCode",
       "value": "",
-      "type": "default",
+      "type": "secret",
       "enabled": true
     },
     {

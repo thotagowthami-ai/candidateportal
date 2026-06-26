@@ -59,14 +59,8 @@ async function bootstrap() {
         return;
       }
 
-      // Match Vercel preview subdomains dynamically
-      if (
-        origin.startsWith('https://candidateportal-') &&
-        origin.endsWith('.vercel.app')
-      ) {
-        callback(null, true);
-        return;
-      }
+      // Keep preview origins explicit via CORS_ALLOWED_PREVIEWS because
+      // credentialed CORS is enabled below.
 
       // Explicit flag for 'null' origin
       if (origin === 'null' && trustNullOrigin) {

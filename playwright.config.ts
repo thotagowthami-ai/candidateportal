@@ -1,10 +1,7 @@
 import { defineConfig, devices } from '@playwright/test';
 
-const baseURL = process.env.DEPLOYED_FRONTEND_URL;
-
-if (!baseURL) {
-  throw new Error('DEPLOYED_FRONTEND_URL is required for deployed smoke tests.');
-}
+// Provide a safe default for local development, allow override for deployed smoke tests
+const baseURL = process.env.DEPLOYED_FRONTEND_URL || 'http://localhost:5173';
 
 export default defineConfig({
   testDir: './tests',
